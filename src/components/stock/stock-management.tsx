@@ -139,7 +139,7 @@ export function StockManagement({ products }: StockManagementProps) {
             ));
           } else {
             errorCount++;
-            if (result.error) {
+            if (!result.success && 'error' in result && result.error) {
               errors.push(`${row.productName}: ${result.error}`);
             }
           }
