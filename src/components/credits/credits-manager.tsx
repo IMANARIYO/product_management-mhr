@@ -47,6 +47,7 @@ export function CreditsManager({ products, credits, userRole }: CreditsManagerPr
   const [selectedProduct, setSelectedProduct] = useState<string>(products[0]?.id || '');
   const [quantity, setQuantity] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
   const [amountOwed, setAmountOwed] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -62,6 +63,7 @@ export function CreditsManager({ products, credits, userRole }: CreditsManagerPr
         selectedProduct,
         parseInt(quantity),
         customerName,
+        customerPhone,
         amountOwed
       );
 
@@ -69,6 +71,7 @@ export function CreditsManager({ products, credits, userRole }: CreditsManagerPr
         toast.success('Credit sale recorded');
         setQuantity('');
         setCustomerName('');
+        setCustomerPhone('');
         setAmountOwed('');
       } else {
         toast.error(result.error || 'Failed to add credit');
@@ -165,6 +168,17 @@ export function CreditsManager({ products, credits, userRole }: CreditsManagerPr
                   </div>
 
                   <div>
+                    <label className="text-sm font-medium mb-2 block">Customer Phone</label>
+                    <Input
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="Customer phone number"
+                      disabled={isLoading}
+                      required
+                    />
+                  </div>
+
+                  <div>
                     <label className="text-sm font-medium mb-2 block">Amount Owed (RWF)</label>
                     <Input
                       type="number"
@@ -201,7 +215,7 @@ export function CreditsManager({ products, credits, userRole }: CreditsManagerPr
                           </p>
                           <p className="text-sm text-muted-foreground">
                             {credit.user.fullName} •{' '}
-                            {formatDistanceToNow(new Date(credit.createdAt), { addSuffix: true })}
+                            {formatDistanceToNow(credit.createdAt, { addSuffix: true })}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Toaster } from "@/components/ui/sonner"
+import { ErrorBoundary } from "@/components/error-boundary"
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
@@ -38,8 +39,17 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
-        {children}
-        <Toaster />
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
+
+
+        <Toaster
+          position="top-right"   // ✅ choose top-right, top-left, bottom-right, bottom-left, top-center, bottom-center
+          richColors             // optional: makes colors nicer
+          closeButton            // optional: show close button
+          duration={4000}        // optional: auto-close after 4s
+        />
       </body>
     </html>
   )

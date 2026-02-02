@@ -202,7 +202,15 @@ export async function deactivateProduct(productId: string) {
   try {
     const session = await requireAuth();
     if (!session) {
-      return { success: false, error: "Unauthorized" };
+      return { 
+        success: false, 
+        error: "Unauthorized",
+        toast: {
+          type: "error" as const,
+          title: "Access Denied",
+          message: "You are not authorized to perform this action"
+        }
+      };
     }
 
     // Check if product exists and is ACTIVE
@@ -211,11 +219,47 @@ export async function deactivateProduct(productId: string) {
     });
 
     if (!product) {
-      return { success: false, error: "Product not found" };
+      return { 
+        success: false, 
+        error: "Product not found",
+        toast: {
+          type: "error" as const,
+          title: "Product Not Found",
+          message: "The product you're trying to deactivate doesn't exist"
+        }
+      };
     }
 
     if (product.status !== "ACTIVE") {
-      return { success: false, error: "Product is already inactive" };
+      return { 
+        success: false, 
+        error: "Product is already inactive",
+        toast: {
+          type: "warning" as const,
+          title: "Already Inactive",
+          message: "This product is already deactivated"
+        }
+      };
+    }
+
+    // Check current stock - prevent deactivation if product has stock
+    const stockResult = await db
+      .select({ total: sum(stocks.quantity) })
+      .from(stocks)
+      .where(eq(stocks.productId, productId));
+
+    const currentStock = Number(stockResult[0]?.total || 0);
+    
+    if (currentStock > 0) {
+      return {
+        success: false,
+        error: `Cannot deactivate product with existing stock. Current stock: ${currentStock} units`,
+        toast: {
+          type: "error" as const,
+          title: "Cannot Deactivate Product",
+          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before deactivating.`
+        }
+      };
     }
 
     // Soft delete - set status to ARCHIVED
@@ -235,10 +279,25 @@ export async function deactivateProduct(productId: string) {
       details: `Deactivated product: ${product.name}`,
     });
 
-    return { success: true };
+    return { 
+      success: true,
+      toast: {
+        type: "success" as const,
+        title: "Product Deactivated",
+        message: `${product.name} has been successfully deactivated`
+      }
+    };
   } catch (error) {
     console.error("Deactivate product error:", error);
-    return { success: false, error: "Failed to deactivate product" };
+    return { 
+      success: false, 
+      error: "Failed to deactivate product",
+      toast: {
+        type: "error" as const,
+        title: "Deactivation Failed",
+        message: "An error occurred while deactivating the product"
+      }
+    };
   }
 }
 

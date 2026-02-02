@@ -1,6 +1,8 @@
 import { getProducts } from '@/app/actions/products';
 import { StockManagement } from '@/components/stock/stock-management';
 
+export const dynamic = 'force-dynamic';
+
 export default async function StockPage() {
   const result = await getProducts(false);
 

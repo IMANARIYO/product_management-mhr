@@ -44,15 +44,15 @@ export const stockDays = pgTable("stock_days", {
     .notNull()
     .unique(),
   status: stockDayStatusEnum("status").notNull().default("OPEN"),
-  openedAt: timestamp("opened_at").defaultNow().notNull(),
+  openedAt: timestamp("opened_at", { withTimezone: true }).defaultNow().notNull(),
   openedBy: uuid("opened_by").notNull(),
 
   // Verification
-  verifiedAt: timestamp("verified_at"),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
   verifiedBy: uuid("verified_by"),
 
   // Closing
-  closedAt: timestamp("closed_at"),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
   closedBy: uuid("closed_by"),
 
   // Daily totals
@@ -63,8 +63,8 @@ export const stockDays = pgTable("stock_days", {
   totalClosingStock: integer("total_closing_stock").default(0).notNull(), // sum of closingStock
 
   notes: text("notes"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const productStatusEnum = pgEnum("product_status", [
@@ -87,8 +87,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull().default("EMPLOYEE"),
   status: userStatusEnum("status").notNull().default("ACTIVE"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Products table
@@ -101,8 +101,8 @@ export const products = pgTable("products", {
   buyingPrice: decimal("buying_price", { precision: 10, scale: 2 }).notNull(),
   sellingPrice: decimal("selling_price", { precision: 10, scale: 2 }).notNull(),
   status: productStatusEnum("status").notNull().default("ACTIVE"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
@@ -116,8 +116,8 @@ export const stocks = pgTable("stocks", {
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Stock Actions table (Audit Trail for all stock movements)
@@ -135,9 +135,9 @@ export const stockActions = pgTable("stock_actions", {
   doneBy: uuid("done_by")
     .notNull()
     .references(() => users.id),
-  doneAt: timestamp("done_at").defaultNow().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  doneAt: timestamp("done_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const dailyStockSnapshots = pgTable(
@@ -169,11 +169,11 @@ export const dailyStockSnapshots = pgTable(
 
     // Verification tracking
     isVerified: integer("is_verified").notNull().default(0),
-    verifiedAt: timestamp("verified_at"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
     verifiedBy: uuid("verified_by").references(() => users.id),
 
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     uniqueDayProduct: {
@@ -186,14 +186,25 @@ export const dailyStockSnapshots = pgTable(
 // Credit Sales table (Header)
 export const creditSales = pgTable("credit_sales", {
   id: uuid("id").defaultRandom().primaryKey(),
+
+  // Customer info
+  customerId: uuid("customer_id"), // optional if you have a customers table
   customerName: varchar("customer_name", { length: 255 }).notNull(),
+  customerPhone: varchar("customer_phone", { length: 20 }).notNull(),
+
+  // Financial info
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
   amountOwed: decimal("amount_owed", { precision: 10, scale: 2 }).notNull(),
   status: creditStatusEnum("status").notNull().default("UNPAID"),
+
+  // Employee handling the credit
   doneBy: uuid("done_by").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  paidAt: timestamp("paid_at"),
+
+  // Payment info
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Credit Sale Items table (Details)
@@ -204,8 +215,8 @@ export const creditSaleItems = pgTable("credit_sale_items", {
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Activity Tracking (Audit Trail)
@@ -216,9 +227,9 @@ export const activityLogs = pgTable("activity_logs", {
   entityType: varchar("entity_type", { length: 50 }).notNull(), // 'USER', 'PRODUCT', 'STOCK', 'CREDIT'
   entityId: uuid("entity_id"),
   details: text("details"),
-  doneAt: timestamp("done_at").defaultNow().notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  doneAt: timestamp("done_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Relations
@@ -330,10 +341,10 @@ export const purchaseOrders = pgTable("purchase_orders", {
     .default("0"),
   status: purchaseOrderStatusEnum("status").notNull().default("DRAFT"),
   createdBy: uuid("created_by").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  submittedAt: timestamp("submitted_at"),
-  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
   notes: text("notes"),
 });
 
@@ -352,8 +363,8 @@ export const purchaseOrderItems = pgTable(
       precision: 12,
       scale: 2,
     }).notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     uniqueProductPerOrder: {

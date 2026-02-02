@@ -9,6 +9,7 @@ export async function addCredit(
   productId: string,
   quantity: number,
   customerName: string,
+  customerPhone: string,
   amountOwed: string
 ) {
   try {
@@ -41,6 +42,7 @@ export async function addCredit(
       .insert(creditSales)
       .values({
         customerName,
+        customerPhone,
         totalAmount: amountOwed,
         amountOwed,
         doneBy: session.userId,

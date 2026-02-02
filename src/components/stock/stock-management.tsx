@@ -4,10 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { Select, MenuItem, TextField, Button, Card, CardContent, Typography, Switch, FormControlLabel, Tabs, Tab, Box, InputAdornment } from '@mui/material';
 import { Search } from 'lucide-react';
-import { toast } from 'sonner';
 import { Product, StockActionType } from '@/db/types';
 import { getCurrentUser } from '@/app/actions/auth';
 import { handleStockAction } from '@/app/actions/stock';
+import { useToastHandler } from '@/hooks/use-toast-handler';
 
 interface StockAdjustmentRow {
   id: string;
@@ -37,6 +37,7 @@ export function StockManagement({ products }: StockManagementProps) {
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
+  const { showToast, handleActionResult } = useToastHandler();
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -73,35 +74,35 @@ export function StockManagement({ products }: StockManagementProps) {
   const handleSubmitAll = async () => {
     if (useGlobalSettings) {
       if (!globalActionType) {
-        toast.error('Action Type is required');
+        showToast({ type: 'error', title: 'Validation Error', message: 'Action Type is required' });
         return;
       }
       if (!globalReason.trim()) {
-        toast.error('Reason is required');
+        showToast({ type: 'error', title: 'Validation Error', message: 'Reason is required' });
         return;
       }
 
       const rowsWithQuantity = filteredRows.filter(row => row.quantity > 0);
       if (rowsWithQuantity.length === 0) {
-        toast.error('At least one product must have quantity > 0');
+        showToast({ type: 'error', title: 'Validation Error', message: 'At least one product must have quantity > 0' });
         return;
       }
 
       if (userRole === 'EMPLOYEE' && (globalActionType === 'SOLD' || globalActionType === 'BROKEN')) {
-        toast.error('Employees cannot perform SOLD or BROKEN actions');
+        showToast({ type: 'error', title: 'Permission Denied', message: 'Employees cannot perform SOLD or BROKEN actions' });
         return;
       }
     } else {
       const validRows = filteredRows.filter(row => row.quantity > 0 && row.actionType !== '' && row.reason.trim());
       if (validRows.length === 0) {
-        toast.error('At least one product must have quantity, action type, and reason');
+        showToast({ type: 'error', title: 'Validation Error', message: 'At least one product must have quantity, action type, and reason' });
         return;
       }
 
       if (userRole === 'EMPLOYEE') {
         const invalidRows = validRows.filter(row => row.actionType === 'SOLD' || row.actionType === 'BROKEN');
         if (invalidRows.length > 0) {
-          toast.error('Employees cannot perform SOLD or BROKEN actions');
+          showToast({ type: 'error', title: 'Permission Denied', message: 'Employees cannot perform SOLD or BROKEN actions' });
           return;
         }
       }
@@ -112,6 +113,7 @@ export function StockManagement({ products }: StockManagementProps) {
     try {
       let successCount = 0;
       let errorCount = 0;
+      const errors: string[] = [];
 
       const rowsToProcess = useGlobalSettings 
         ? filteredRows.filter(row => row.quantity > 0)
@@ -126,6 +128,8 @@ export function StockManagement({ products }: StockManagementProps) {
             reason: useGlobalSettings ? globalReason : row.reason,
           });
 
+          handleActionResult(result);
+
           if (result.success && 'newStock' in result) {
             successCount++;
             setRows(prev => prev.map(r => 
@@ -135,24 +139,36 @@ export function StockManagement({ products }: StockManagementProps) {
             ));
           } else {
             errorCount++;
+            if (result.error) {
+              errors.push(`${row.productName}: ${result.error}`);
+            }
           }
-        } catch {
+        } catch (error) {
           errorCount++;
+          errors.push(`${row.productName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
 
       if (successCount > 0) {
-        toast.success(`Successfully updated ${successCount} products`);
         if (useGlobalSettings) {
           setGlobalActionType('');
           setGlobalReason('');
         }
       }
-      if (errorCount > 0) {
-        toast.error(`Failed to update ${errorCount} products`);
+      
+      if (errorCount > 0 && errors.length > 0) {
+        showToast({ 
+          type: 'error', 
+          title: `Failed to update ${errorCount} products`, 
+          message: errors.slice(0, 3).join('; ') + (errors.length > 3 ? '...' : '')
+        });
       }
-    } catch {
-      toast.error('An error occurred');
+    } catch (error) {
+      showToast({ 
+        type: 'error', 
+        title: 'System Error', 
+        message: error instanceof Error ? error.message : 'An unexpected error occurred'
+      });
     } finally {
       setLoading(false);
     }

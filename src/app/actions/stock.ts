@@ -12,6 +12,7 @@ import { db } from "@/index";
 import { getSession } from "@/lib/auth-middleware";
 import { eq, and, desc, between, sum } from "drizzle-orm";
 import { StockActionType } from "@/db/types";
+import { revalidatePath } from "next/cache";
 
 interface StockActionParams {
   productId: string;
@@ -70,17 +71,24 @@ export async function handleStockAction({
       // 3. Get or create today's stock day and snapshot
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       let stockDay = await tx.query.stockDays.findFirst({
-        where: eq(stockDays.businessDate, today)
+        where: eq(stockDays.businessDate, today),
       });
 
       if (!stockDay) {
-        console.log(`[STOCK_ACTION_INFO] Creating new stock day for ${today.toISOString().split('T')[0]}`);
-        const [newStockDay] = await tx.insert(stockDays).values({
-          businessDate: today,
-          openedBy: session.userId,
-        }).returning();
+        console.log(
+          `[STOCK_ACTION_INFO] Creating new stock day for ${
+            today.toISOString().split("T")[0]
+          }`
+        );
+        const [newStockDay] = await tx
+          .insert(stockDays)
+          .values({
+            businessDate: today,
+            openedBy: session.userId,
+          })
+          .returning();
         stockDay = newStockDay;
       }
 
@@ -104,6 +112,7 @@ export async function handleStockAction({
             openingStock: currentStock,
             stockIn: 0,
             stockOut: 0,
+            isVerified: 1,
             closingStock: currentStock,
             isOutOfStock: currentStock <= 0 ? 1 : 0,
           })
@@ -112,7 +121,8 @@ export async function handleStockAction({
       }
 
       let stockChange = 0;
-      let snapshotUpdates: Partial<typeof dailyStockSnapshots.$inferInsert> = {};
+      let snapshotUpdates: Partial<typeof dailyStockSnapshots.$inferInsert> =
+        {};
 
       // 4. Handle different action types
       switch (actionType) {
@@ -231,11 +241,19 @@ export async function handleStockAction({
       console.log(
         `[STOCK_ACTION_SUCCESS] ${actionType} completed successfully`
       );
+      
+      revalidatePath('/dashboard/stock');
+      
       return {
         success: true,
         action: newAction,
         stockChange,
         newStock: currentStock + stockChange,
+        toast: {
+          type: "success" as const,
+          title: "Stock Updated",
+          message: `${actionType} completed successfully. ${quantity} units processed.`
+        }
       };
     });
   } catch (error) {
@@ -243,12 +261,17 @@ export async function handleStockAction({
       `[STOCK_ACTION_TRANSACTION_ERROR] ${actionType} failed:`,
       error
     );
+    
+    const errorMessage = error instanceof Error ? error.message : "Failed to process stock action";
+    
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to process stock action",
+      error: errorMessage,
+      toast: {
+        type: "error" as const,
+        title: "Stock Action Failed",
+        message: errorMessage
+      }
     };
   }
 }

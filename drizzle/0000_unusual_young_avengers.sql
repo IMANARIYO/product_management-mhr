@@ -31,14 +31,16 @@ CREATE TABLE "credit_sale_items" (
 --> statement-breakpoint
 CREATE TABLE "credit_sales" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"customer_id" uuid,
 	"customer_name" varchar(255) NOT NULL,
+	"customer_phone" varchar(20) NOT NULL,
 	"total_amount" numeric(10, 2) NOT NULL,
 	"amount_owed" numeric(10, 2) NOT NULL,
 	"status" "credit_status" DEFAULT 'UNPAID' NOT NULL,
 	"done_by" uuid NOT NULL,
+	"paid_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
-	"updated_at" timestamp DEFAULT now() NOT NULL,
-	"paid_at" timestamp
+	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "daily_stock_snapshots" (

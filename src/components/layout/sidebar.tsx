@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,7 @@ import {
   ShoppingCart,
   Users,
   LogOut,
-  Menu,
-  X,
+
   Activity,
   Glasses,
   Calendar,
@@ -32,18 +31,22 @@ interface User {
 
 interface SidebarProps {
   user: User;
+  collapsed?: boolean;
+  onToggleCollapse?: (collapsed: boolean) => void;
+  isMobile?: boolean;
+  onMobileClose?: () => void;
 }
 
 type SidebarState = 'full' | 'icons' | 'hidden';
 
 import { LucideIcon } from 'lucide-react';
 
-function NavItems({ 
-  menuItems, 
-  pathname, 
-  isAdmin, 
-  onItemClick, 
-  sidebarState 
+function NavItems({
+  menuItems,
+  pathname,
+  isAdmin,
+  onItemClick,
+  sidebarState
 }: {
   menuItems: Array<{
     href: string;
@@ -87,10 +90,28 @@ function NavItems({
   );
 }
 
-export function Sidebar({ user }: SidebarProps) {
+export function Sidebar({
+  user,
+  collapsed = false,
+  onToggleCollapse,
+  isMobile = false,
+  onMobileClose
+}: SidebarProps) {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarState, setSidebarState] = useState<SidebarState>('full');
+
+  const sidebarState = isMobile ? 'full' : (collapsed ? 'icons' : 'full');
+
+  const handleItemClick = () => {
+    if (isMobile && onMobileClose) {
+      onMobileClose();
+    }
+  };
+
+  const handleToggle = () => {
+    if (!isMobile && onToggleCollapse) {
+      onToggleCollapse(!collapsed);
+    }
+  };
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -139,211 +160,131 @@ export function Sidebar({ user }: SidebarProps) {
     },
     ...(isAdmin
       ? [
-          {
-            href: '/dashboard/users',
-            label: 'Users',
-            icon: Users,
-            adminOnly: true,
-          },
-          {
-            href: '/dashboard/reports',
-            label: 'Reports',
-            icon: FileText,
-            adminOnly: true,
-          },
-        ]
+        {
+          href: '/dashboard/users',
+          label: 'Users',
+          icon: Users,
+          adminOnly: true,
+        },
+        {
+          href: '/dashboard/reports',
+          label: 'Reports',
+          icon: FileText,
+          adminOnly: true,
+        },
+      ]
       : []),
   ];
 
   const handleLogout = async () => {
     await logoutUser();
+    if (isMobile && onMobileClose) {
+      onMobileClose();
+    }
   };
 
-  const toggleSidebar = () => {
-    if (sidebarState === 'full') setSidebarState('icons');
-    else if (sidebarState === 'icons') setSidebarState('hidden');
-    else setSidebarState('full');
-  };
-
-  const sidebarWidth = sidebarState === 'full' ? 'w-64' : sidebarState === 'icons' ? 'w-16' : 'w-0';
-
-  return (
-    <>
-      {/* Mobile toggle button */}
-      <div className="lg:hidden fixed top-4 left-4 z-50">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
-          {mobileOpen ? (
-            <X className="h-4 w-4" />
-          ) : (
-            <Menu className="h-4 w-4" />
-          )}
-        </Button>
-      </div>
-
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 lg:hidden z-40"
-          onClick={() => setMobileOpen(false)}
+  // Mobile version - simplified for drawer
+  if (isMobile) {
+    return (
+      <div className="space-y-4">
+        <NavItems
+          menuItems={menuItems}
+          pathname={pathname}
+          isAdmin={isAdmin}
+          onItemClick={handleItemClick}
+          sidebarState="full"
         />
-      )}
 
-      {/* Mobile Sidebar */}
-      <aside
-        className={cn(
-          'fixed left-0 top-0 z-40 w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col overflow-y-auto lg:hidden',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full'
-        )}
-      >
-        <div className="p-6 border-b border-sidebar-border">
-          <h1 className="text-2xl font-bold text-sidebar-foreground flex items-center gap-2">
-            <Glasses className="h-6 w-6" />
-            Bar Manager
-          </h1>
-          <p className="text-xs text-muted-foreground mt-2">Rwanda</p>
-        </div>
-
-        <div className="flex-1 p-6">
-          <NavItems 
-            menuItems={menuItems}
-            pathname={pathname}
-            isAdmin={isAdmin}
-            onItemClick={() => setMobileOpen(false)}
-            sidebarState="full"
-          />
-        </div>
-
-        <div className="p-6 border-t border-sidebar-border">
-          <div className="mb-4 p-3 bg-sidebar-accent rounded-lg">
-            <p className="text-xs font-medium text-sidebar-accent-foreground">
-              {user?.fullName}
-            </p>
-            <p className="text-xs text-muted-foreground">{user?.role}</p>
+        <div className="pt-4 border-t">
+          <div className="mb-4 p-3 bg-gray-100 rounded-lg">
+            <p className="text-sm font-medium">{user?.fullName}</p>
+            <p className="text-xs text-gray-600">{user?.role}</p>
           </div>
           <Button
             variant="outline"
-            className="w-full justify-start bg-transparent"
+            className="w-full justify-start"
             onClick={handleLogout}
           >
             <LogOut className="mr-2 h-4 w-4" />
             Logout
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  // Desktop version
+  return (
+    <>
+      <aside className={cn(
+        'fixed left-0 top-0 z-40 h-screen bg-white border-r flex-col transition-all duration-300',
+        collapsed ? 'w-16' : 'w-64'
+      )}>
+        {/* Header */}
+        <div className={cn('p-6 border-b', collapsed && 'p-4')}>
+          {collapsed ? (
+            <div className="flex justify-center">
+              <Glasses className="h-6 w-6" />
+            </div>
+          ) : (
+            <>
+              <h1 className="text-xl font-bold flex items-center gap-2">
+                <Glasses className="h-5 w-5" />
+                Bar Manager
+              </h1>
+              <p className="text-xs text-gray-500 mt-1">Rwanda</p>
+            </>
+          )}
+        </div>
+
+        {/* Navigation */}
+        <div className={cn('flex-1 p-6', collapsed && 'p-4')}>
+          <NavItems
+            menuItems={menuItems}
+            pathname={pathname}
+            isAdmin={isAdmin}
+            onItemClick={() => { }}
+            sidebarState={sidebarState}
+          />
+        </div>
+
+        {/* Footer */}
+        <div className={cn('p-6 border-t', collapsed && 'p-4')}>
+          {collapsed ? (
+            <div className="space-y-2">
+              <Button variant="ghost" size="icon" className="w-full" title={user?.fullName}>
+                <User className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="w-full" onClick={handleLogout} title="Logout">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="mb-4 p-3 bg-gray-100 rounded-lg">
+                <p className="text-sm font-medium">{user?.fullName}</p>
+                <p className="text-xs text-gray-600">{user?.role}</p>
+              </div>
+              <Button variant="outline" className="w-full justify-start" onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4" />
+                Logout
+              </Button>
+            </>
+          )}
+        </div>
       </aside>
 
-      {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          'hidden lg:flex fixed left-0 top-0 z-40 h-screen bg-sidebar border-r border-sidebar-border flex-col overflow-y-auto transition-all duration-300',
-          sidebarWidth,
-          sidebarState === 'hidden' && 'border-r-0'
-        )}
-      >
-        {sidebarState !== 'hidden' && (
-          <>
-            {/* Logo area */}
-            <div className={cn(
-              'p-6 border-b border-sidebar-border',
-              sidebarState === 'icons' && 'p-4'
-            )}>
-              {sidebarState === 'full' ? (
-                <>
-                  <h1 className="text-2xl font-bold text-sidebar-foreground flex items-center gap-2">
-                    <Glasses className="h-6 w-6" />
-                    Bar Manager
-                  </h1>
-                  <p className="text-xs text-muted-foreground mt-2">Rwanda</p>
-                </>
-              ) : (
-                <div className="flex justify-center">
-                  <Glasses className="h-6 w-6 text-sidebar-foreground" />
-                </div>
-              )}
-            </div>
-
-            {/* Navigation */}
-            <div className={cn(
-              'flex-1 p-6',
-              sidebarState === 'icons' && 'p-4'
-            )}>
-              <NavItems 
-                menuItems={menuItems}
-                pathname={pathname}
-                isAdmin={isAdmin}
-                onItemClick={() => {}}
-                sidebarState={sidebarState}
-              />
-            </div>
-
-            {/* User info and logout */}
-            <div className={cn(
-              'p-6 border-t border-sidebar-border',
-              sidebarState === 'icons' && 'p-4'
-            )}>
-              {sidebarState === 'full' ? (
-                <>
-                  <div className="mb-4 p-3 bg-sidebar-accent rounded-lg">
-                    <p className="text-xs font-medium text-sidebar-accent-foreground">
-                      {user?.fullName}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{user?.role}</p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start bg-transparent"
-                    onClick={handleLogout}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Logout
-                  </Button>
-                </>
-              ) : (
-                <div className="space-y-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-full"
-                    title={user?.fullName}
-                  >
-                    <User className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-full"
-                    onClick={handleLogout}
-                    title="Logout"
-                  >
-                    <LogOut className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </aside>
-
-      {/* Toggle button for desktop */}
+      {/* Toggle Button */}
       <Button
         variant="outline"
         size="icon"
         className={cn(
-          'hidden lg:flex fixed top-4 z-50 transition-all duration-300',
-          sidebarState === 'full' && 'left-60',
-          sidebarState === 'icons' && 'left-12',
-          sidebarState === 'hidden' && 'left-4'
+          'fixed top-4 z-50 transition-all duration-300',
+          collapsed ? 'left-12' : 'left-60'
         )}
-        onClick={toggleSidebar}
+        onClick={handleToggle}
       >
-        {sidebarState === 'hidden' ? (
-          <ChevronsRight className="h-4 w-4" />
-        ) : (
-          <ChevronsLeft className="h-4 w-4" />
-        )}
+        {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
       </Button>
     </>
   );
