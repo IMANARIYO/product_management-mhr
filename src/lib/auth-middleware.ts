@@ -1,38 +1,12 @@
 import { cookies } from "next/headers";
 import { verifyJWT } from "./auth";
-import { randomUUID } from "crypto";
-import fs from "fs";
-import path from "path";
 
 export interface SessionUser {
   userId: string;
   phoneNumber: string;
+  fullName: string;
   role: "ADMIN" | "EMPLOYEE";
 }
-
-// Generate or retrieve persistent temp user ID
-function getTempUserId(): string {
-  const tempUserFile = path.join(process.cwd(), ".temp-user-id");
-
-  try {
-    if (fs.existsSync(tempUserFile)) {
-      return fs.readFileSync(tempUserFile, "utf8").trim();
-    }
-  } catch (error) {
-    console.log("Could not read temp user file, generating new ID", error);
-  }
-
-  const newUserId = randomUUID();
-  try {
-    fs.writeFileSync(tempUserFile, newUserId);
-  } catch (error) {
-    console.log("Could not save temp user ID, using session-only ID", error);
-  }
-
-  return newUserId;
-}
-
-const TEMP_USER_ID = getTempUserId();
 
 export async function getSession(): Promise<SessionUser | null> {
   const cookieStore = await cookies();
@@ -54,6 +28,7 @@ export async function getSession(): Promise<SessionUser | null> {
   return {
     userId: payload.userId as string,
     phoneNumber: payload.phoneNumber as string,
+    fullName: payload.fullName as string,
     role: role as "ADMIN" | "EMPLOYEE",
   };
 }

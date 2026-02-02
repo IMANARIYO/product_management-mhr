@@ -12,6 +12,7 @@ import {
 
   Home,
 } from 'lucide-react';
+import StockInPage from '@/app/dashboard/stockin/page';
 
 const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: Home },
@@ -20,6 +21,8 @@ const navItems = [
   { label: 'Credit Sales', href: '/dashboard/credits', icon: BarChart3 },
   { label: 'Reports', href: '/dashboard/reports', icon: FileText },
   { label: 'Users', href: '/dashboard/users', icon: Users, adminOnly: true },
+  { label: 'stock', href: '/dashboard/stock', icon: StockInPage, adminOnly: true },
+
 ];
 
 export function DashboardSidebar() {

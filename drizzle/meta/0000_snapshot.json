@@ -1,5 +1,5 @@
 {
-  "id": "e16dbd0f-2420-4782-aa53-6a0a19782219",
+  "id": "b74fffe1-6345-4706-a0f7-bfc9cf71cf1b",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -234,11 +234,23 @@
           "primaryKey": false,
           "notNull": true
         },
+        "expected_opening_stock": {
+          "name": "expected_opening_stock",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "opening_stock": {
           "name": "opening_stock",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "variance": {
+          "name": "variance",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "stock_in": {
           "name": "stock_in",
@@ -267,6 +279,25 @@
           "notNull": true,
           "default": 0
         },
+        "is_verified": {
+          "name": "is_verified",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_by": {
+          "name": "verified_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -283,7 +314,47 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "daily_stock_snapshots_stock_day_id_stock_days_id_fk": {
+          "name": "daily_stock_snapshots_stock_day_id_stock_days_id_fk",
+          "tableFrom": "daily_stock_snapshots",
+          "tableTo": "stock_days",
+          "columnsFrom": [
+            "stock_day_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "daily_stock_snapshots_product_id_products_id_fk": {
+          "name": "daily_stock_snapshots_product_id_products_id_fk",
+          "tableFrom": "daily_stock_snapshots",
+          "tableTo": "products",
+          "columnsFrom": [
+            "product_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "daily_stock_snapshots_verified_by_users_id_fk": {
+          "name": "daily_stock_snapshots_verified_by_users_id_fk",
+          "tableFrom": "daily_stock_snapshots",
+          "tableTo": "users",
+          "columnsFrom": [
+            "verified_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -337,13 +408,6 @@
           "type": "numeric(10, 2)",
           "primaryKey": false,
           "notNull": true
-        },
-        "current_stock": {
-          "name": "current_stock",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "status": {
           "name": "status",
@@ -474,12 +538,6 @@
         "order_number": {
           "name": "order_number",
           "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "supplier_name": {
-          "name": "supplier_name",
-          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
@@ -731,6 +789,41 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "total_expected_opening": {
+          "name": "total_expected_opening",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_opening_stock": {
+          "name": "total_opening_stock",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_stock_in": {
+          "name": "total_stock_in",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_stock_out": {
+          "name": "total_stock_out",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "total_closing_stock": {
+          "name": "total_closing_stock",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "notes": {
           "name": "notes",

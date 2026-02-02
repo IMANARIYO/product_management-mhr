@@ -1,262 +1,261 @@
 "use server";
 
-import { products, stocks, stockActions, activityLogs } from "@/db/schema";
+import {
+  products,
+  stocks,
+  stockActions,
+  activityLogs,
+  dailyStockSnapshots,
+  stockDays,
+} from "@/db/schema";
 import { db } from "@/index";
 import { getSession } from "@/lib/auth-middleware";
 import { eq, and, desc, between, sum } from "drizzle-orm";
+import { StockActionType } from "@/db/types";
 
-export async function addStockAction(
-  productId: string,
-  quantity: number,
-  supplier?: string
-) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return { error: "Unauthorized" };
-    }
-
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-    });
-
-    if (!product) {
-      return { error: "Product not found" };
-    }
-
-    // Add to stocks table
-    await db.insert(stocks).values({
-      productId,
-      quantity,
-      createdBy: session.userId,
-    });
-
-    // Create stock action record
-    const newAction = await db
-      .insert(stockActions)
-      .values({
-        productId,
-        actionType: "STOCK_IN",
-        quantity,
-        supplier,
-        doneBy: session.userId,
-      })
-      .returning();
-
-    // Log activity
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "STOCK_IN",
-      entityType: "STOCK",
-      entityId: productId,
-      details: `Added ${quantity} units from ${supplier || "unknown supplier"}`,
-    });
-
-    return { success: true, action: newAction[0] };
-  } catch (error) {
-    console.error("Add stock error:", error);
-    return { error: "Failed to add stock" };
-  }
+interface StockActionParams {
+  productId: string;
+  actionType: StockActionType;
+  quantity: number;
+  reason?: string;
+  supplier?: string;
+  sellingPrice?: string;
 }
 
-export async function sellProductAction(
-  productId: string,
-  quantity: number
-) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return { error: "Unauthorized" };
-    }
-
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-    });
-
-    if (!product) {
-      return { error: "Product not found" };
-    }
-
-    // Get current stock from stocks table
-    const stockResult = await db
-      .select({ total: sum(stocks.quantity) })
-      .from(stocks)
-      .where(eq(stocks.productId, productId));
-    
-    const currentStock = Number(stockResult[0]?.total || 0);
-
-    if (currentStock < quantity) {
-      return { error: `Insufficient stock. Available: ${currentStock}` };
-    }
-
-    // Record the sale as negative stock
-    await db.insert(stocks).values({
-      productId,
-      quantity: -quantity,
-      createdBy: session.userId,
-    });
-
-    // Create stock action record
-    const newAction = await db
-      .insert(stockActions)
-      .values({
-        productId,
-        actionType: "SOLD",
-        quantity,
-        sellingPrice: product.sellingPrice,
-        doneBy: session.userId,
-      })
-      .returning();
-
-    // Log activity
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "SOLD",
-      entityType: "STOCK",
-      entityId: productId,
-      details: `Sold ${quantity} units at ${product.sellingPrice} per unit`,
-    });
-
-    return { success: true, action: newAction[0] };
-  } catch (error) {
-    console.error("Sell product error:", error);
-    return { error: "Failed to sell product" };
+export async function handleStockAction({
+  productId,
+  actionType,
+  quantity,
+  reason,
+  supplier,
+  sellingPrice,
+}: StockActionParams) {
+  const session = await getSession();
+  if (!session) {
+    console.error(
+      `[STOCK_ACTION_ERROR] Unauthorized access attempt for ${actionType}`
+    );
+    return { success: false, error: "Unauthorized" };
   }
-}
 
-export async function recordBrokenAction(
-  productId: string,
-  quantity: number,
-  reason: string
-) {
+  console.log(
+    `[STOCK_ACTION_START] ${actionType} - Product: ${productId}, Quantity: ${quantity}`
+  );
+
   try {
-    const session = await getSession();
-    if (!session) {
-      return { error: "Unauthorized" };
-    }
-
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-    });
-
-    if (!product) {
-      return { error: "Product not found" };
-    }
-
-    // Get current stock from stocks table
-    const stockResult = await db
-      .select({ total: sum(stocks.quantity) })
-      .from(stocks)
-      .where(eq(stocks.productId, productId));
-    
-    const currentStock = Number(stockResult[0]?.total || 0);
-
-    if (currentStock < quantity) {
-      return { error: `Insufficient stock. Available: ${currentStock}` };
-    }
-
-    // Record the breakage as negative stock
-    await db.insert(stocks).values({
-      productId,
-      quantity: -quantity,
-      createdBy: session.userId,
-    });
-
-    // Create stock action record
-    const newAction = await db
-      .insert(stockActions)
-      .values({
-        productId,
-        actionType: "BROKEN",
-        quantity,
-        reason,
-        doneBy: session.userId,
-      })
-      .returning();
-
-    // Log activity
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "BROKEN",
-      entityType: "STOCK",
-      entityId: productId,
-      details: `Recorded ${quantity} broken units. Reason: ${reason}`,
-    });
-
-    return { success: true, action: newAction[0] };
-  } catch (error) {
-    console.error("Record broken error:", error);
-    return { error: "Failed to record broken stock" };
-  }
-}
-
-export async function countStockAction(
-  productId: string,
-  countedQuantity: number
-) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return { error: "Unauthorized" };
-    }
-
-    const product = await db.query.products.findFirst({
-      where: eq(products.id, productId),
-    });
-
-    if (!product) {
-      return { error: "Product not found" };
-    }
-
-    // Get current stock from stocks table
-    const stockResult = await db
-      .select({ total: sum(stocks.quantity) })
-      .from(stocks)
-      .where(eq(stocks.productId, productId));
-    
-    const systemQuantity = Number(stockResult[0]?.total || 0);
-    const difference = countedQuantity - systemQuantity;
-
-    // Add stock adjustment if there's a difference
-    if (difference !== 0) {
-      await db.insert(stocks).values({
-        productId,
-        quantity: difference,
-        createdBy: session.userId,
+    return await db.transaction(async (tx) => {
+      // 1. Validate product exists
+      const product = await tx.query.products.findFirst({
+        where: eq(products.id, productId),
       });
-    }
 
-    // Create stock action record
-    const newAction = await db
-      .insert(stockActions)
-      .values({
-        productId,
-        actionType: "COUNTED",
-        quantity: countedQuantity,
-        reason: `System: ${systemQuantity}, Counted: ${countedQuantity}, Difference: ${difference}`,
-        doneBy: session.userId,
-      })
-      .returning();
+      if (!product) {
+        console.error(
+          `[STOCK_ACTION_ERROR] Product not found: ${productId} for ${actionType}`
+        );
+        throw new Error("Product not found");
+      }
 
-    // Log activity
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "COUNTED",
-      entityType: "STOCK",
-      entityId: productId,
-      details: `Stock count: System=${systemQuantity}, Counted=${countedQuantity}, Difference=${difference}`,
+      // 2. Get current stock
+      const stockResult = await tx
+        .select({ total: sum(stocks.quantity) })
+        .from(stocks)
+        .where(eq(stocks.productId, productId));
+
+      const currentStock = Number(stockResult[0]?.total || 0);
+      console.log(
+        `[STOCK_ACTION_INFO] Current stock for ${productId}: ${currentStock}`
+      );
+
+      // 3. Get or create today's stock day and snapshot
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      let stockDay = await tx.query.stockDays.findFirst({
+        where: eq(stockDays.businessDate, today)
+      });
+
+      if (!stockDay) {
+        console.log(`[STOCK_ACTION_INFO] Creating new stock day for ${today.toISOString().split('T')[0]}`);
+        const [newStockDay] = await tx.insert(stockDays).values({
+          businessDate: today,
+          openedBy: session.userId,
+        }).returning();
+        stockDay = newStockDay;
+      }
+
+      let snapshot = await tx.query.dailyStockSnapshots.findFirst({
+        where: and(
+          eq(dailyStockSnapshots.productId, productId),
+          eq(dailyStockSnapshots.stockDayId, stockDay.id)
+        ),
+      });
+
+      if (!snapshot) {
+        console.log(
+          `[STOCK_ACTION_INFO] Creating new daily snapshot for ${productId} on ${stockDay.id}`
+        );
+        const [newSnapshot] = await tx
+          .insert(dailyStockSnapshots)
+          .values({
+            stockDayId: stockDay.id,
+            productId,
+            expectedOpeningStock: currentStock,
+            openingStock: currentStock,
+            stockIn: 0,
+            stockOut: 0,
+            closingStock: currentStock,
+            isOutOfStock: currentStock <= 0 ? 1 : 0,
+          })
+          .returning();
+        snapshot = newSnapshot;
+      }
+
+      let stockChange = 0;
+      let snapshotUpdates: Partial<typeof dailyStockSnapshots.$inferInsert> = {};
+
+      // 4. Handle different action types
+      switch (actionType) {
+        case "STOCK_IN":
+          console.log(`[STOCK_IN_ACTION] Adding ${quantity} units`);
+          stockChange = quantity;
+          snapshotUpdates = {
+            stockIn: snapshot.stockIn + quantity,
+            closingStock: snapshot.closingStock + quantity,
+            isOutOfStock: snapshot.closingStock + quantity > 0 ? 0 : 1,
+          };
+          break;
+
+        case "SOLD":
+          console.log(`[SOLD_ACTION] Selling ${quantity} units`);
+          if (currentStock < quantity) {
+            console.error(
+              `[SOLD_ERROR] Insufficient stock: ${currentStock} < ${quantity}`
+            );
+            throw new Error(`Insufficient stock. Available: ${currentStock}`);
+          }
+          stockChange = -quantity;
+          snapshotUpdates = {
+            stockOut: snapshot.stockOut + quantity,
+            closingStock: snapshot.closingStock - quantity,
+            isOutOfStock: snapshot.closingStock - quantity <= 0 ? 1 : 0,
+          };
+          break;
+
+        case "BROKEN":
+          console.log(`[BROKEN_ACTION] Recording ${quantity} broken units`);
+          if (currentStock < quantity) {
+            console.error(
+              `[BROKEN_ERROR] Insufficient stock: ${currentStock} < ${quantity}`
+            );
+            throw new Error(`Insufficient stock. Available: ${currentStock}`);
+          }
+          stockChange = -quantity;
+          snapshotUpdates = {
+            stockOut: snapshot.stockOut + quantity,
+            closingStock: snapshot.closingStock - quantity,
+            isOutOfStock: snapshot.closingStock - quantity <= 0 ? 1 : 0,
+          };
+          break;
+
+        case "COUNTED":
+          console.log(
+            `[COUNTED_ACTION] Physical count: ${quantity}, System: ${currentStock}`
+          );
+          const variance = quantity - currentStock;
+          stockChange = variance;
+          snapshotUpdates = {
+            openingStock: quantity,
+            variance: variance,
+            closingStock: quantity + snapshot.stockIn - snapshot.stockOut,
+            isOutOfStock:
+              quantity + snapshot.stockIn - snapshot.stockOut <= 0 ? 1 : 0,
+          };
+          console.log(`[COUNTED_INFO] Variance: ${variance}`);
+          break;
+
+        default:
+          console.error(
+            `[STOCK_ACTION_ERROR] Invalid action type: ${actionType}`
+          );
+          throw new Error(`Invalid action type: ${actionType}`);
+      }
+
+      // 5. Update stock if there's a change
+      if (stockChange !== 0) {
+        console.log(`[STOCK_UPDATE] Applying stock change: ${stockChange}`);
+        await tx.insert(stocks).values({
+          productId,
+          quantity: stockChange,
+          createdBy: session.userId,
+        });
+      }
+
+      // 6. Update daily snapshot
+      console.log(
+        `[SNAPSHOT_UPDATE] Updating daily snapshot:`,
+        snapshotUpdates
+      );
+      await tx
+        .update(dailyStockSnapshots)
+        .set(snapshotUpdates)
+        .where(eq(dailyStockSnapshots.id, snapshot.id));
+
+      // 7. Create stock action record
+      console.log(`[STOCK_ACTION_RECORD] Creating action record`);
+      const [newAction] = await tx
+        .insert(stockActions)
+        .values({
+          productId,
+          actionType,
+          quantity,
+          supplier,
+          sellingPrice,
+          reason,
+          doneBy: session.userId,
+        })
+        .returning();
+
+      // 8. Log activity
+      console.log(`[ACTIVITY_LOG] Logging activity`);
+      await tx.insert(activityLogs).values({
+        userId: session.userId,
+        action: actionType,
+        entityType: "STOCK",
+        entityId: productId,
+        details: `${actionType}: ${quantity} units. ${
+          reason || supplier || ""
+        }`,
+      });
+
+      console.log(
+        `[STOCK_ACTION_SUCCESS] ${actionType} completed successfully`
+      );
+      return {
+        success: true,
+        action: newAction,
+        stockChange,
+        newStock: currentStock + stockChange,
+      };
     });
-
-    return { success: true, action: newAction[0], difference };
   } catch (error) {
-    console.error("Count stock error:", error);
-    return { error: "Failed to count stock" };
+    console.error(
+      `[STOCK_ACTION_TRANSACTION_ERROR] ${actionType} failed:`,
+      error
+    );
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to process stock action",
+    };
   }
 }
 
 export async function getStockActionsAction(
   productId?: string,
-  actionType?: "STOCK_IN" | "SOLD" | "BROKEN" | "COUNTED",
+  actionType?: StockActionType,
   page: number = 1,
   limit: number = 20,
   startDate?: Date,
@@ -309,109 +308,10 @@ export async function getStockActionsAction(
       totalPages: Math.ceil(allActions.length / limit),
     };
   } catch (error) {
-    console.error("[v0] Get stock actions error:", error);
+    console.error(
+      "[GET_STOCK_ACTIONS_ERROR] Failed to fetch stock actions:",
+      error
+    );
     return { error: "Failed to fetch stock actions" };
-  }
-}
-export async function manualStockAdjustment({
-  productId,
-  actionType,
-  quantity,
-  reason,
-}: {
-  productId: string;
-  actionType: 'STOCK_IN' | 'SOLD' | 'BROKEN' | 'COUNTED';
-  quantity: number;
-  reason: string;
-}) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    // Input validation
-    if (quantity <= 0) {
-      return { success: false, error: "Quantity must be greater than 0" };
-    }
-    if (!reason.trim()) {
-      return { success: false, error: "Reason is required" };
-    }
-    if (!['STOCK_IN', 'SOLD', 'BROKEN', 'COUNTED'].includes(actionType)) {
-      return { success: false, error: "Invalid action type" };
-    }
-
-    // Role-based validation
-    if (session.role === 'EMPLOYEE' && (actionType === 'SOLD' || actionType === 'BROKEN')) {
-      return { success: false, error: "Employees cannot perform SOLD or BROKEN actions" };
-    }
-
-    // Start transaction
-    return await db.transaction(async (tx) => {
-      // Get product
-      const product = await tx.query.products.findFirst({
-        where: eq(products.id, productId),
-      });
-
-      if (!product) {
-        throw new Error("Product not found");
-      }
-
-      // Get current stock from stocks table
-      const stockResult = await tx
-        .select({ total: sum(stocks.quantity) })
-        .from(stocks)
-        .where(eq(stocks.productId, productId));
-      
-      const currentStock = Number(stockResult[0]?.total || 0);
-
-      // Calculate delta
-      let delta = 0;
-      if (actionType === 'STOCK_IN') delta = quantity;
-      if (actionType === 'SOLD') delta = -quantity;
-      if (actionType === 'BROKEN') delta = -quantity;
-      if (actionType === 'COUNTED') delta = quantity - currentStock;
-
-      // Stock removal validation
-      if ((actionType === 'SOLD' || actionType === 'BROKEN') && currentStock < quantity) {
-        throw new Error(`Insufficient stock. Available: ${currentStock}`);
-      }
-      if (actionType === 'COUNTED' && quantity < 0) {
-        throw new Error("Counted quantity cannot be negative");
-      }
-
-      // Update stocks table
-      if (delta !== 0) {
-        await tx.insert(stocks).values({
-          productId,
-          quantity: delta,
-          createdBy: session.userId,
-        });
-      }
-
-      // Insert stock action (audit log)
-      await tx.insert(stockActions).values({
-        productId,
-        actionType,
-        quantity: actionType === 'COUNTED' ? quantity : Math.abs(delta),
-        reason,
-        doneBy: session.userId,
-      });
-
-      // Insert activity log
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "MANUAL_STOCK_ADJUSTMENT",
-        entityType: "PRODUCT",
-        entityId: productId,
-        details: `${actionType} ${actionType === 'COUNTED' ? quantity : Math.abs(delta)} units – ${reason}`,
-      });
-
-      const newStock = currentStock + delta;
-      return { success: true, newStock };
-    });
-  } catch (error) {
-    console.error("Manual stock adjustment error:", error);
-    return { success: false, error: error instanceof Error ? error.message : "Failed to adjust stock" };
   }
 }

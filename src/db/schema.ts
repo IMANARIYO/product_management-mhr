@@ -28,6 +28,7 @@ export const productTypeEnum = pgEnum("product_type", [
   "SPIRIT",
   "LIQUOR",
 ]);
+
 export const stockDayStatusEnum = pgEnum("stock_day_status", [
   "OPEN",
   "VERIFIED",
@@ -45,10 +46,22 @@ export const stockDays = pgTable("stock_days", {
   status: stockDayStatusEnum("status").notNull().default("OPEN"),
   openedAt: timestamp("opened_at").defaultNow().notNull(),
   openedBy: uuid("opened_by").notNull(),
+
+  // Verification
   verifiedAt: timestamp("verified_at"),
   verifiedBy: uuid("verified_by"),
+
+  // Closing
   closedAt: timestamp("closed_at"),
   closedBy: uuid("closed_by"),
+
+  // Daily totals
+  totalExpectedOpening: integer("total_expected_opening").default(0).notNull(), // sum of expectedOpeningStock
+  totalOpeningStock: integer("total_opening_stock").default(0).notNull(), // sum of openingStock
+  totalStockIn: integer("total_stock_in").default(0).notNull(), // sum of stockIn
+  totalStockOut: integer("total_stock_out").default(0).notNull(), // sum of stockOut
+  totalClosingStock: integer("total_closing_stock").default(0).notNull(), // sum of closingStock
+
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -131,13 +144,34 @@ export const dailyStockSnapshots = pgTable(
   "daily_stock_snapshots",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    stockDayId: uuid("stock_day_id").notNull(),
-    productId: uuid("product_id").notNull(),
+
+    stockDayId: uuid("stock_day_id")
+      .notNull()
+      .references(() => stockDays.id),
+
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+
+    // System value (auto-copied at day opening)
+    expectedOpeningStock: integer("expected_opening_stock").notNull(),
+    // Physical count (filled during verification)
     openingStock: integer("opening_stock").notNull(),
+    // Difference between actual and expected
+    variance: integer("variance"),
+
+    // Daily movements (optional but useful)
     stockIn: integer("stock_in").notNull().default(0),
     stockOut: integer("stock_out").notNull().default(0),
+
     closingStock: integer("closing_stock").notNull(),
     isOutOfStock: integer("is_out_of_stock").notNull().default(0),
+
+    // Verification tracking
+    isVerified: integer("is_verified").notNull().default(0),
+    verifiedAt: timestamp("verified_at"),
+    verifiedBy: uuid("verified_by").references(() => users.id),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },

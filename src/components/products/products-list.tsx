@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Edit2, Trash2, Eye, Grid3X3, List } from 'lucide-react';
 import { ProductDialog } from './product-dialog';
 import { ProductCard } from './product-card';
-import { archiveProduct } from '@/app/actions/products';
+import { deactivateProduct } from '@/app/actions/products';
 import { toast } from 'sonner';
 import { Product } from '@/db/types';
 import Image from 'next/image';
@@ -48,7 +48,7 @@ export function ProductsList({ products, userRole, onProductsChange }: ProductsL
     console.log('Deleting product:', { productId, productName });
 
     try {
-      const result = await archiveProduct(productId);
+      const result = await deactivateProduct(productId);
       console.log('Delete result:', result);
 
       if (result.success) {

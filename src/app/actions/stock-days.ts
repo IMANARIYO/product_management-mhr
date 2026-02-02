@@ -1,16 +1,16 @@
 "use server";
 
 import { db } from "@/index";
-import { 
-  stockDays, 
-  dailyStockSnapshots, 
-  stocks, 
+import {
+  stockDays,
+  dailyStockSnapshots,
+  stocks,
   products,
   stockActions,
-  activityLogs 
+  activityLogs,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-middleware";
-import { eq, and, desc, sum } from "drizzle-orm";
+import { eq, and, sum } from "drizzle-orm";
 
 export async function getCurrentStockDay() {
   try {
@@ -27,10 +27,10 @@ export async function getCurrentStockDay() {
       with: {
         snapshots: {
           with: {
-            product: true
-          }
-        }
-      }
+            product: true,
+          },
+        },
+      },
     });
 
     return { success: true, stockDay };
@@ -52,7 +52,7 @@ export async function openStockDay() {
 
     // Check if stock day already exists
     const existingStockDay = await db.query.stockDays.findFirst({
-      where: eq(stockDays.businessDate, today)
+      where: eq(stockDays.businessDate, today),
     });
 
     if (existingStockDay) {
@@ -60,23 +60,28 @@ export async function openStockDay() {
     }
 
     // Create new stock day
-    const [stockDay] = await db.insert(stockDays).values({
-      businessDate: today,
-      status: "OPEN",
-      openedBy: session.userId
-    }).returning();
+    const [stockDay] = await db
+      .insert(stockDays)
+      .values({
+        businessDate: today,
+        status: "OPEN",
+        openedBy: session.userId,
+      })
+      .returning();
 
     // Get all products and calculate current stock
     const allProducts = await db.query.products.findMany({
-      where: eq(products.status, "ACTIVE")
+      where: eq(products.status, "ACTIVE"),
     });
 
     // Create snapshots for each product
     for (const product of allProducts) {
       // Calculate current stock from stocks table
-      const stockEntries = await db.select({
-        totalStock: sum(stocks.quantity)
-      }).from(stocks)
+      const stockEntries = await db
+        .select({
+          totalStock: sum(stocks.quantity),
+        })
+        .from(stocks)
         .where(eq(stocks.productId, product.id));
 
       const currentStock = Number(stockEntries[0]?.totalStock || 0);
@@ -84,11 +89,12 @@ export async function openStockDay() {
       await db.insert(dailyStockSnapshots).values({
         stockDayId: stockDay.id,
         productId: product.id,
+        expectedOpeningStock: currentStock,
         openingStock: currentStock,
         stockIn: 0,
         stockOut: 0,
         closingStock: currentStock,
-        isOutOfStock: currentStock === 0 ? 1 : 0
+        isOutOfStock: currentStock === 0 ? 1 : 0,
       });
     }
 
@@ -98,7 +104,7 @@ export async function openStockDay() {
       action: "STOCK_DAY_OPENED",
       entityType: "STOCK_DAY",
       entityId: stockDay.id,
-      details: `Opened stock day for ${today.toDateString()}`
+      details: `Opened stock day for ${today.toDateString()}`,
     });
 
     return { success: true, stockDay };
@@ -108,7 +114,11 @@ export async function openStockDay() {
   }
 }
 
-export async function verifyStockSnapshot(stockDayId: string, productId: string, verifiedQuantity: number) {
+export async function verifyStockSnapshot(
+  stockDayId: string,
+  productId: string,
+  verifiedQuantity: number
+) {
   try {
     const session = await requireAuth();
     if (!session) {
@@ -122,8 +132,8 @@ export async function verifyStockSnapshot(stockDayId: string, productId: string,
         eq(dailyStockSnapshots.productId, productId)
       ),
       with: {
-        product: true
-      }
+        product: true,
+      },
     });
 
     if (!snapshot) {
@@ -134,17 +144,20 @@ export async function verifyStockSnapshot(stockDayId: string, productId: string,
 
     await db.transaction(async (tx) => {
       // Update the snapshot
-      await tx.update(dailyStockSnapshots)
+      await tx
+        .update(dailyStockSnapshots)
         .set({
           openingStock: verifiedQuantity,
           closingStock: verifiedQuantity + snapshot.stockIn - snapshot.stockOut,
           isOutOfStock: verifiedQuantity === 0 ? 1 : 0,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(and(
-          eq(dailyStockSnapshots.stockDayId, stockDayId),
-          eq(dailyStockSnapshots.productId, productId)
-        ));
+        .where(
+          and(
+            eq(dailyStockSnapshots.stockDayId, stockDayId),
+            eq(dailyStockSnapshots.productId, productId)
+          )
+        );
 
       // If there's a difference, record it as a stock action
       if (difference !== 0) {
@@ -152,15 +165,17 @@ export async function verifyStockSnapshot(stockDayId: string, productId: string,
           productId: productId,
           actionType: "COUNTED",
           quantity: Math.abs(difference),
-          reason: `Stock verification: ${difference > 0 ? 'Found extra' : 'Missing'} ${Math.abs(difference)} units`,
-          doneBy: session.userId
+          reason: `Stock verification: ${
+            difference > 0 ? "Found extra" : "Missing"
+          } ${Math.abs(difference)} units`,
+          doneBy: session.userId,
         });
 
         // Add or remove stock to match verified quantity
         await tx.insert(stocks).values({
           productId: productId,
           quantity: difference,
-          createdBy: session.userId
+          createdBy: session.userId,
         });
       }
 
@@ -170,7 +185,11 @@ export async function verifyStockSnapshot(stockDayId: string, productId: string,
         action: "STOCK_VERIFIED",
         entityType: "STOCK_SNAPSHOT",
         entityId: snapshot.id,
-        details: `Verified ${snapshot.product.name}: ${verifiedQuantity} units (${difference >= 0 ? '+' : ''}${difference})`
+        details: `Verified ${
+          snapshot.product.name
+        }: ${verifiedQuantity} units (${
+          difference >= 0 ? "+" : ""
+        }${difference})`,
       });
     });
 
@@ -193,12 +212,13 @@ export async function verifyStockDay(stockDayId: string) {
     }
 
     await db.transaction(async (tx) => {
-      await tx.update(stockDays)
+      await tx
+        .update(stockDays)
         .set({
           status: "VERIFIED",
           verifiedAt: new Date(),
           verifiedBy: session.userId,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(stockDays.id, stockDayId));
 
@@ -207,7 +227,7 @@ export async function verifyStockDay(stockDayId: string) {
         action: "STOCK_DAY_VERIFIED",
         entityType: "STOCK_DAY",
         entityId: stockDayId,
-        details: "Stock day verified by admin"
+        details: "Stock day verified by admin",
       });
     });
 
@@ -218,7 +238,12 @@ export async function verifyStockDay(stockDayId: string) {
   }
 }
 
-export async function addStockToSnapshot(stockDayId: string, productId: string, quantity: number, reason: string) {
+export async function addStockToSnapshot(
+  stockDayId: string,
+  productId: string,
+  quantity: number,
+  reason: string
+) {
   try {
     const session = await requireAuth();
     if (!session) {
@@ -231,30 +256,33 @@ export async function addStockToSnapshot(stockDayId: string, productId: string, 
         where: and(
           eq(dailyStockSnapshots.stockDayId, stockDayId),
           eq(dailyStockSnapshots.productId, productId)
-        )
+        ),
       });
 
       if (!snapshot) {
         throw new Error("Snapshot not found");
       }
 
-      await tx.update(dailyStockSnapshots)
+      await tx
+        .update(dailyStockSnapshots)
         .set({
           stockIn: snapshot.stockIn + quantity,
           closingStock: snapshot.closingStock + quantity,
           isOutOfStock: 0,
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
-        .where(and(
-          eq(dailyStockSnapshots.stockDayId, stockDayId),
-          eq(dailyStockSnapshots.productId, productId)
-        ));
+        .where(
+          and(
+            eq(dailyStockSnapshots.stockDayId, stockDayId),
+            eq(dailyStockSnapshots.productId, productId)
+          )
+        );
 
       // Add to stocks table
       await tx.insert(stocks).values({
         productId: productId,
         quantity: quantity,
-        createdBy: session.userId
+        createdBy: session.userId,
       });
 
       // Record stock action
@@ -263,7 +291,7 @@ export async function addStockToSnapshot(stockDayId: string, productId: string, 
         actionType: "STOCK_IN",
         quantity: quantity,
         reason: reason,
-        doneBy: session.userId
+        doneBy: session.userId,
       });
     });
 

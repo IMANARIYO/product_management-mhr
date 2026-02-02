@@ -7,7 +7,7 @@ import { Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { Product, StockActionType } from '@/db/types';
 import { getCurrentUser } from '@/app/actions/auth';
-import { manualStockAdjustment } from '@/app/actions/stock';
+import { handleStockAction } from '@/app/actions/stock';
 
 interface StockAdjustmentRow {
   id: string;
@@ -119,7 +119,7 @@ export function StockManagement({ products }: StockManagementProps) {
 
       for (const row of rowsToProcess) {
         try {
-          const result = await manualStockAdjustment({
+          const result = await handleStockAction({
             productId: row.id,
             actionType: useGlobalSettings ? (globalActionType as StockActionType) : (row.actionType as StockActionType),
             quantity: row.quantity,

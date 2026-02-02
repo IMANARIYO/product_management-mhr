@@ -1,13 +1,74 @@
 "use server";
 
-import { eq, sum } from "drizzle-orm";
+import { eq, sum, and } from "drizzle-orm";
 import { getSession, requireAuth } from "@/lib/auth-middleware";
 import { activityLogs, products, stocks, stockActions } from "@/db/schema";
 import { db } from "@/index";
-import { NewProduct, UpdateProduct } from "@/db/types";
+import {
+  NewProduct,
+  UpdateProduct,
+  productTypeValues,
+  ProductType,
+} from "@/db/types";
+
+// Validation helpers
+function validateProductData(data: {
+  name: string;
+  type: string;
+  size: string;
+  buyingPrice: string;
+  sellingPrice: string;
+}) {
+  const errors: string[] = [];
+
+  if (!data.name?.trim()) errors.push("Product name is required");
+  if (!data.type || !productTypeValues.includes(data.type as ProductType)) {
+    errors.push(`Product type must be one of: ${productTypeValues.join(", ")}`);
+  }
+  if (!data.size?.trim()) errors.push("Product size is required");
+
+  const buyingPrice = parseFloat(data.buyingPrice);
+  const sellingPrice = parseFloat(data.sellingPrice);
+
+  if (isNaN(buyingPrice) || buyingPrice <= 0) {
+    errors.push("Buying price must be greater than 0");
+  }
+  if (isNaN(sellingPrice) || sellingPrice <= buyingPrice) {
+    errors.push("Selling price must be greater than buying price");
+  }
+
+  return errors;
+}
+
+async function checkDuplicateProduct(
+  name: string,
+  type: string,
+  size: string,
+  excludeId?: string
+) {
+  const whereClause = excludeId
+    ? and(
+        eq(products.name, name),
+        eq(products.type, type as ProductType),
+        eq(products.size, size),
+        eq(products.status, "ACTIVE")
+      )
+    : and(
+        eq(products.name, name),
+        eq(products.type, type as ProductType),
+        eq(products.size, size),
+        eq(products.status, "ACTIVE")
+      );
+
+  const existing = await db.query.products.findFirst({ where: whereClause });
+  return existing;
+}
 
 export async function createProduct(
-  data: Omit<NewProduct, "id" | "createdAt" | "updatedAt" | "createdBy" | "status">
+  data: Omit<
+    NewProduct,
+    "id" | "createdAt" | "updatedAt" | "createdBy" | "status"
+  >
 ) {
   try {
     const session = await requireAuth();
@@ -15,13 +76,32 @@ export async function createProduct(
       return { success: false, error: "Unauthorized" };
     }
 
+    // Validate input data
+    const validationErrors = validateProductData(data);
+    if (validationErrors.length > 0) {
+      return { success: false, error: validationErrors.join(", ") };
+    }
+
+    // Check for duplicate product (name + type + size)
+    const duplicate = await checkDuplicateProduct(
+      data.name,
+      data.type,
+      data.size
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `Product already exists: ${data.name} ${data.size} (${data.type})`,
+      };
+    }
+
     const productData: NewProduct = {
       ...data,
       createdBy: session.userId,
-      status: 'ACTIVE',
+      status: "ACTIVE", // System controls status
     };
 
-    const newProduct = await db
+    const [newProduct] = await db
       .insert(products)
       .values(productData)
       .returning();
@@ -30,11 +110,11 @@ export async function createProduct(
       userId: session.userId,
       action: "CREATE_PRODUCT",
       entityType: "PRODUCT",
-      entityId: newProduct[0].id,
-      details: `Created product: ${data.name}`,
+      entityId: newProduct.id,
+      details: `Created product: ${data.name} ${data.size} (${data.type})`,
     });
 
-    return { success: true, product: newProduct[0] };
+    return { success: true, product: newProduct };
   } catch (error) {
     console.error("Create product error:", error);
     return { success: false, error: "Failed to create product" };
@@ -48,7 +128,54 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
       return { success: false, error: "Unauthorized" };
     }
 
-    // Add updatedAt timestamp
+    // Check if product exists
+    const existingProduct = await db.query.products.findFirst({
+      where: eq(products.id, productId),
+    });
+
+    if (!existingProduct) {
+      return { success: false, error: "Product not found" };
+    }
+
+    // Validate updated data if provided
+    if (
+      data.name ||
+      data.type ||
+      data.size ||
+      data.buyingPrice ||
+      data.sellingPrice
+    ) {
+      const validationData = {
+        name: data.name || existingProduct.name,
+        type: data.type || existingProduct.type,
+        size: data.size || existingProduct.size,
+        buyingPrice: data.buyingPrice || existingProduct.buyingPrice,
+        sellingPrice: data.sellingPrice || existingProduct.sellingPrice,
+      };
+
+      const validationErrors = validateProductData(validationData);
+      if (validationErrors.length > 0) {
+        return { success: false, error: validationErrors.join(", ") };
+      }
+
+      // Check for duplicate if name/type/size changed
+      if (data.name || data.type || data.size) {
+        const duplicate = await checkDuplicateProduct(
+          validationData.name,
+          validationData.type,
+          validationData.size,
+          productId
+        );
+        if (duplicate) {
+          return {
+            success: false,
+            error: `Product already exists: ${validationData.name} ${validationData.size} (${validationData.type})`,
+          };
+        }
+      }
+    }
+
+    // Update with system-controlled timestamp
     const updateData = {
       ...data,
       updatedAt: new Date(),
@@ -61,7 +188,7 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
       action: "UPDATE_PRODUCT",
       entityType: "PRODUCT",
       entityId: productId,
-      details: `Updated product: ${productId}`,
+      details: `Updated product: ${existingProduct.name}`,
     });
 
     return { success: true };
@@ -71,16 +198,30 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
   }
 }
 
-export async function archiveProduct(productId: string) {
+export async function deactivateProduct(productId: string) {
   try {
     const session = await requireAuth();
     if (!session) {
       return { success: false, error: "Unauthorized" };
     }
 
+    // Check if product exists and is ACTIVE
+    const product = await db.query.products.findFirst({
+      where: eq(products.id, productId),
+    });
+
+    if (!product) {
+      return { success: false, error: "Product not found" };
+    }
+
+    if (product.status !== "ACTIVE") {
+      return { success: false, error: "Product is already inactive" };
+    }
+
+    // Soft delete - set status to ARCHIVED
     await db
       .update(products)
-      .set({ 
+      .set({
         status: "ARCHIVED",
         updatedAt: new Date(),
       })
@@ -88,20 +229,77 @@ export async function archiveProduct(productId: string) {
 
     await db.insert(activityLogs).values({
       userId: session.userId,
-      action: "ARCHIVE_PRODUCT",
+      action: "DEACTIVATE_PRODUCT",
       entityType: "PRODUCT",
       entityId: productId,
-      details: `Archived product: ${productId}`,
+      details: `Deactivated product: ${product.name}`,
     });
 
     return { success: true };
   } catch (error) {
-    console.error("Archive product error:", error);
-    return { success: false, error: "Failed to archive product" };
+    console.error("Deactivate product error:", error);
+    return { success: false, error: "Failed to deactivate product" };
   }
 }
 
-export async function getProducts(includeArchived: boolean = false) {
+export async function reactivateProduct(productId: string) {
+  try {
+    const session = await requireAuth();
+    if (!session) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    // Check if product exists and is ARCHIVED
+    const product = await db.query.products.findFirst({
+      where: eq(products.id, productId),
+    });
+
+    if (!product) {
+      return { success: false, error: "Product not found" };
+    }
+
+    if (product.status !== "ARCHIVED") {
+      return { success: false, error: "Product is already active" };
+    }
+
+    // Check for naming conflict with active products
+    const duplicate = await checkDuplicateProduct(
+      product.name,
+      product.type,
+      product.size
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `Cannot reactivate: Active product already exists with same name, type, and size`,
+      };
+    }
+
+    // Reactivate product
+    await db
+      .update(products)
+      .set({
+        status: "ACTIVE",
+        updatedAt: new Date(),
+      })
+      .where(eq(products.id, productId));
+
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "REACTIVATE_PRODUCT",
+      entityType: "PRODUCT",
+      entityId: productId,
+      details: `Reactivated product: ${product.name}`,
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Reactivate product error:", error);
+    return { success: false, error: "Failed to reactivate product" };
+  }
+}
+
+export async function getProducts(includeInactive: boolean = false) {
   try {
     const session = await getSession();
     if (!session) {
@@ -109,24 +307,31 @@ export async function getProducts(includeArchived: boolean = false) {
     }
 
     let allProducts;
-    if (includeArchived) {
+    if (includeInactive) {
+      // Admin view - show all products
       allProducts = await db.query.products.findMany({
         with: {
           stocks: true,
         },
+        orderBy: (products, { desc }) => [desc(products.createdAt)],
       });
     } else {
+      // POS/Stock view - show ACTIVE only
       allProducts = await db.query.products.findMany({
         where: eq(products.status, "ACTIVE"),
         with: {
           stocks: true,
         },
+        orderBy: (products, { desc }) => [desc(products.createdAt)],
       });
     }
 
     // Calculate current stock for each product
-    const productsWithStock = allProducts.map(product => {
-      const currentStock = product.stocks.reduce((total, stock) => total + stock.quantity, 0);
+    const productsWithStock = allProducts.map((product) => {
+      const currentStock = product.stocks.reduce(
+        (total, stock) => total + stock.quantity,
+        0
+      );
       return {
         ...product,
         currentStock,
@@ -159,7 +364,10 @@ export async function getProduct(productId: string) {
     }
 
     // Calculate current stock
-    const currentStock = product.stocks.reduce((total, stock) => total + stock.quantity, 0);
+    const currentStock = product.stocks.reduce(
+      (total, stock) => total + stock.quantity,
+      0
+    );
     const productWithStock = {
       ...product,
       currentStock,
@@ -184,12 +392,21 @@ export async function addStock(
       return { success: false, error: "Unauthorized" };
     }
 
+    // Check if product exists and is ACTIVE
     const product = await db.query.products.findFirst({
       where: eq(products.id, productId),
     });
 
     if (!product) {
       return { success: false, error: "Product not found" };
+    }
+
+    if (product.status !== "ACTIVE") {
+      return { success: false, error: "Cannot add stock to inactive product" };
+    }
+
+    if (quantity <= 0) {
+      return { success: false, error: "Quantity must be greater than 0" };
     }
 
     // Add to stocks table
@@ -229,6 +446,7 @@ export async function sellProduct(productId: string, quantity: number) {
       return { success: false, error: "Unauthorized" };
     }
 
+    // Check if product exists and is ACTIVE
     const product = await db.query.products.findFirst({
       where: eq(products.id, productId),
     });
@@ -237,12 +455,20 @@ export async function sellProduct(productId: string, quantity: number) {
       return { success: false, error: "Product not found" };
     }
 
+    if (product.status !== "ACTIVE") {
+      return { success: false, error: "Cannot sell inactive product" };
+    }
+
+    if (quantity <= 0) {
+      return { success: false, error: "Quantity must be greater than 0" };
+    }
+
     // Get current stock from stocks table
     const stockResult = await db
       .select({ total: sum(stocks.quantity) })
       .from(stocks)
       .where(eq(stocks.productId, productId));
-    
+
     const currentStock = Number(stockResult[0]?.total || 0);
 
     if (currentStock < quantity) {
@@ -260,6 +486,7 @@ export async function sellProduct(productId: string, quantity: number) {
       productId,
       actionType: "SOLD",
       quantity,
+      sellingPrice: product.sellingPrice,
       doneBy: session.userId,
     });
 
@@ -301,7 +528,7 @@ export async function markBroken(
       .select({ total: sum(stocks.quantity) })
       .from(stocks)
       .where(eq(stocks.productId, productId));
-    
+
     const currentStock = Number(stockResult[0]?.total || 0);
 
     if (currentStock < quantity) {
@@ -357,7 +584,7 @@ export async function countStock(productId: string, countedQuantity: number) {
       .select({ total: sum(stocks.quantity) })
       .from(stocks)
       .where(eq(stocks.productId, productId));
-    
+
     const systemStock = Number(stockResult[0]?.total || 0);
     const difference = countedQuantity - systemStock;
 

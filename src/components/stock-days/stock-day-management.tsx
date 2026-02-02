@@ -1,25 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, Typography, Button, TextField, Dialog, DialogTitle, DialogContent, Table, TableHead, TableRow, TableCell, TableBody, Chip } from '@mui/material';
-import { CheckCircle, Add, Visibility } from '@mui/icons-material';
+import { useState, useEffect, useMemo } from 'react';
+import { Card, CardContent, Typography, Button, Chip, Dialog, DialogTitle, DialogContent, TextField, Box, Tooltip } from '@mui/material';
+import { DataGrid, GridColDef, GridRenderCellParams, GridToolbar } from '@mui/x-data-grid';
+import { Add, CheckCircle, Visibility } from '@mui/icons-material';
 import { toast } from 'sonner';
 import { getCurrentUser } from '@/app/actions/auth';
-import { getCurrentStockDay, openStockDay, verifyStockSnapshot, verifyStockDay, addStockToSnapshot } from '@/app/actions/stock-days';
+import { initializeStockDay, verifyProductStock, verifyStockDay as verifyStockDayInit } from '@/app/actions/stock-day-init';
+import { closeCurrentStockDay } from '@/app/actions/stock-day-close';
 import { StockDayStatus } from '@/db/types';
 
 interface StockSnapshot {
   id: string;
   productId: string;
+  expectedOpeningStock: number;
   openingStock: number;
+  variance: number | null;
   stockIn: number;
   stockOut: number;
   closingStock: number;
   isOutOfStock: number;
+  isVerified: number;
   product: {
     id: string;
     name: string;
     size: string;
+    sellingPrice: string;
+    buyingPrice: string;
   };
 }
 
@@ -36,12 +43,23 @@ interface CurrentUser {
   role: 'ADMIN' | 'EMPLOYEE';
 }
 
+interface SnapshotRow extends StockSnapshot {
+  productName: string;
+  productSize: string;
+  sellingPrice: number;
+  buyingPrice: number;
+  openingValue: number;
+  closingValue: number;
+  varianceValue: number;
+}
+
 export function StockDayManagement() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [stockDay, setStockDay] = useState<StockDay | null>(null);
   const [loading, setLoading] = useState(false);
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
   const [addStockDialogOpen, setAddStockDialogOpen] = useState(false);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<StockSnapshot | null>(null);
   const [verifiedQuantity, setVerifiedQuantity] = useState(0);
   const [addQuantity, setAddQuantity] = useState(0);
@@ -54,16 +72,19 @@ export function StockDayManagement() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [userResult, stockDayResult] = await Promise.all([
-        getCurrentUser(),
-        getCurrentStockDay()
-      ]);
-
+      const userResult = await getCurrentUser();
       if (userResult) setUser(userResult as CurrentUser);
-      if (stockDayResult.success && stockDayResult.stockDay) {
-        setStockDay(stockDayResult.stockDay);
+
+      const today = new Date();
+      const result = await initializeStockDay(today);
+      if (result.stockDay && result.snapshots) {
+        setStockDay({
+          ...result.stockDay,
+          snapshots: result.snapshots
+        });
       }
     } catch (error) {
+      console.error('Error fetching data:', error);
       toast.error('Failed to fetch data');
     } finally {
       setLoading(false);
@@ -73,14 +94,14 @@ export function StockDayManagement() {
   const handleOpenStockDay = async () => {
     setLoading(true);
     try {
-      const result = await openStockDay();
-      if (result.success) {
+      const today = new Date();
+      const result = await initializeStockDay(today);
+      if (result.stockDay) {
         toast.success('Stock day opened successfully');
         fetchData();
-      } else {
-        toast.error(result.error || 'Failed to open stock day');
       }
     } catch (error) {
+      console.error('Error opening stock day:', error);
       toast.error('Failed to open stock day');
     } finally {
       setLoading(false);
@@ -94,20 +115,17 @@ export function StockDayManagement() {
   };
 
   const handleConfirmVerify = async () => {
-    if (!selectedSnapshot || !stockDay) return;
+    if (!selectedSnapshot) return;
 
     setLoading(true);
     try {
-      const result = await verifyStockSnapshot(stockDay.id, selectedSnapshot.productId, verifiedQuantity);
-      if (result.success) {
-        toast.success('Stock verified successfully');
-        setVerifyDialogOpen(false);
-        setSelectedSnapshot(null);
-        fetchData();
-      } else {
-        toast.error(result.error || 'Failed to verify stock');
-      }
+      await verifyProductStock(selectedSnapshot.id, verifiedQuantity);
+      toast.success('Stock verified successfully');
+      setVerifyDialogOpen(false);
+      setSelectedSnapshot(null);
+      fetchData();
     } catch (error) {
+      console.error('Error verifying stock:', error);
       toast.error('Failed to verify stock');
     } finally {
       setLoading(false);
@@ -122,20 +140,15 @@ export function StockDayManagement() {
   };
 
   const handleConfirmAddStock = async () => {
-    if (!selectedSnapshot || !stockDay || addQuantity <= 0) return;
+    if (!selectedSnapshot || addQuantity <= 0) return;
 
     setLoading(true);
     try {
-      const result = await addStockToSnapshot(stockDay.id, selectedSnapshot.productId, addQuantity, addReason);
-      if (result.success) {
-        toast.success('Stock added successfully');
-        setAddStockDialogOpen(false);
-        setSelectedSnapshot(null);
-        fetchData();
-      } else {
-        toast.error(result.error || 'Failed to add stock');
-      }
+      toast.success('Stock add functionality not implemented yet');
+      setAddStockDialogOpen(false);
+      setSelectedSnapshot(null);
     } catch (error) {
+      console.error('Error adding stock:', error);
       toast.error('Failed to add stock');
     } finally {
       setLoading(false);
@@ -147,15 +160,29 @@ export function StockDayManagement() {
 
     setLoading(true);
     try {
-      const result = await verifyStockDay(stockDay.id);
-      if (result.success) {
-        toast.success('Stock day verified successfully');
+      await verifyStockDayInit(stockDay.id);
+      toast.success('Stock day verified successfully');
+      fetchData();
+    } catch (error) {
+      console.error('Error verifying stock day:', error);
+      toast.error('Failed to verify stock day');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloseStockDay = async () => {
+    setLoading(true);
+    try {
+      const result = await closeCurrentStockDay();
+      if (result) {
+        toast.success('Stock day closed successfully');
+        setCloseDialogOpen(false);
         fetchData();
-      } else {
-        toast.error(result.error || 'Failed to verify stock day');
       }
     } catch (error) {
-      toast.error('Failed to verify stock day');
+      console.error('Error closing stock day:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to close stock day');
     } finally {
       setLoading(false);
     }
@@ -169,6 +196,195 @@ export function StockDayManagement() {
       default: return 'default';
     }
   };
+
+  const rows: SnapshotRow[] = useMemo(() => {
+    if (!stockDay?.snapshots) return [];
+
+    return stockDay.snapshots.map(snapshot => {
+      const sellingPrice = parseFloat(snapshot.product.sellingPrice || '0');
+      const buyingPrice = parseFloat(snapshot.product.buyingPrice || '0');
+      const variance = snapshot.variance || 0;
+
+      return {
+        ...snapshot,
+        productName: snapshot.product.name,
+        productSize: snapshot.product.size,
+        sellingPrice,
+        buyingPrice,
+        openingValue: snapshot.openingStock * sellingPrice,
+        closingValue: snapshot.closingStock * sellingPrice,
+        varianceValue: variance * sellingPrice,
+      };
+    });
+  }, [stockDay?.snapshots]);
+
+  const totalValues = useMemo(() => {
+    return rows.reduce((acc, row) => ({
+      openingStock: acc.openingStock + row.openingStock,
+      closingStock: acc.closingStock + row.closingStock,
+      stockIn: acc.stockIn + row.stockIn,
+      stockOut: acc.stockOut + row.stockOut,
+      openingValue: acc.openingValue + row.openingValue,
+      closingValue: acc.closingValue + row.closingValue,
+      varianceValue: acc.varianceValue + row.varianceValue,
+    }), {
+      openingStock: 0,
+      closingStock: 0,
+      stockIn: 0,
+      stockOut: 0,
+      openingValue: 0,
+      closingValue: 0,
+      varianceValue: 0,
+    });
+  }, [rows]);
+
+  const allProductsVerified = stockDay?.snapshots?.every(snapshot => snapshot.isVerified === 1) ?? false;
+  const unverifiedCount = stockDay?.snapshots?.filter(snapshot => snapshot.isVerified !== 1).length ?? 0;
+
+  const columns: GridColDef[] = [
+    {
+      field: 'productName',
+      headerName: 'Product',
+      flex: 1,
+      minWidth: 200,
+    },
+    {
+      field: 'productSize',
+      headerName: 'Size',
+      width: 100,
+    },
+    {
+      field: 'sellingPrice',
+      headerName: 'Selling Price',
+      width: 120,
+      renderCell: (params: GridRenderCellParams) => `RWF ${params.value.toLocaleString()}`,
+    },
+    {
+      field: 'buyingPrice',
+      headerName: 'Buying Price',
+      width: 120,
+      renderCell: (params: GridRenderCellParams) => `RWF ${params.value.toLocaleString()}`,
+    },
+    {
+      field: 'expectedOpeningStock',
+      headerName: 'Expected',
+      width: 100,
+      type: 'number',
+    },
+    {
+      field: 'openingStock',
+      headerName: 'Opening Stock',
+      width: 120,
+      type: 'number',
+    },
+    {
+      field: 'openingValue',
+      headerName: 'Opening Value',
+      width: 130,
+      renderCell: (params: GridRenderCellParams) => `RWF ${params.value.toLocaleString()}`,
+    },
+    {
+      field: 'stockIn',
+      headerName: 'Stock In',
+      width: 100,
+      type: 'number',
+      renderCell: (params: GridRenderCellParams) => (
+        <span className="text-green-600 font-medium">+{params.value}</span>
+      ),
+    },
+    {
+      field: 'stockOut',
+      headerName: 'Stock Out',
+      width: 100,
+      type: 'number',
+      renderCell: (params: GridRenderCellParams) => (
+        <span className="text-red-600 font-medium">-{params.value}</span>
+      ),
+    },
+    {
+      field: 'closingStock',
+      headerName: 'Closing Stock',
+      width: 120,
+      type: 'number',
+    },
+    {
+      field: 'closingValue',
+      headerName: 'Closing Value',
+      width: 130,
+      renderCell: (params: GridRenderCellParams) => `RWF ${params.value.toLocaleString()}`,
+    },
+    {
+      field: 'variance',
+      headerName: 'Variance',
+      width: 100,
+      type: 'number',
+      renderCell: (params: GridRenderCellParams) => {
+        const value = params.value || 0;
+        return (
+          <span className={value >= 0 ? 'text-green-600' : 'text-red-600'}>
+            {value >= 0 ? '+' : ''}{value}
+          </span>
+        );
+      },
+    },
+    {
+      field: 'varianceValue',
+      headerName: 'Variance Value',
+      width: 130,
+      renderCell: (params: GridRenderCellParams) => {
+        const value = params.value || 0;
+        return (
+          <span className={value >= 0 ? 'text-green-600' : 'text-red-600'}>
+            RWF {value.toLocaleString()}
+          </span>
+        );
+      },
+    },
+    {
+      field: 'isVerified',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params: GridRenderCellParams) => (
+        <div className="flex gap-1">
+          {params.value ? (
+            <Chip label="Verified" color="success" size="small" />
+          ) : (
+            <Chip label="Pending" color="warning" size="small" />
+          )}
+          {params.row.isOutOfStock ? (
+            <Chip label="Out" color="error" size="small" />
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      field: 'actions',
+      headerName: 'Actions',
+      width: 200,
+      sortable: false,
+      filterable: false,
+      renderCell: (params: GridRenderCellParams) => (
+        <div className="flex gap-1">
+          <Button
+            size="small"
+            startIcon={<Visibility />}
+            onClick={() => handleVerifyStock(params.row)}
+            disabled={stockDay?.status !== 'OPEN' || params.row.isVerified === 1}
+          >
+            Verify
+          </Button>
+          <Button
+            size="small"
+            startIcon={<Add />}
+            onClick={() => handleAddStock(params.row)}
+            disabled={stockDay?.status !== 'OPEN'}
+          >
+            Add
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   if (!user) return null;
 
@@ -201,84 +417,111 @@ export function StockDayManagement() {
                   <Typography variant="h6">
                     Stock Day - {new Date(stockDay.businessDate).toDateString()}
                   </Typography>
-                  <Chip 
-                    label={stockDay.status} 
+                  <Chip
+                    label={stockDay.status}
                     color={getStatusColor(stockDay.status)}
                     size="small"
                     className="mt-2"
                   />
                 </div>
                 {stockDay.status === 'OPEN' && user.role === 'ADMIN' && (
+                  <Tooltip 
+                    title={!allProductsVerified ? `Please verify all ${unverifiedCount} remaining products before proceeding` : ""}
+                    arrow
+                  >
+                    <span>
+                      <Button
+                        variant="contained"
+                        color="success"
+                        startIcon={<CheckCircle />}
+                        onClick={handleVerifyStockDay}
+                        disabled={loading || !allProductsVerified}
+                      >
+                        Verify Stock Day
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
+                {stockDay.status === 'VERIFIED' && user.role === 'ADMIN' && (
                   <Button
                     variant="contained"
-                    color="success"
-                    startIcon={<CheckCircle />}
-                    onClick={handleVerifyStockDay}
+                    color="error"
+                    onClick={() => setCloseDialogOpen(true)}
                     disabled={loading}
                   >
-                    Verify Stock Day
+                    Close Stock Day
                   </Button>
                 )}
               </div>
             </CardContent>
           </Card>
 
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <Typography variant="subtitle2" color="textSecondary">Opening Stock</Typography>
+                <Typography variant="h6">{totalValues.openingStock} units</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  RWF {totalValues.openingValue.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <Typography variant="subtitle2" color="textSecondary">Closing Stock</Typography>
+                <Typography variant="h6">{totalValues.closingStock} units</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  RWF {totalValues.closingValue.toLocaleString()}
+                </Typography>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <Typography variant="subtitle2" color="textSecondary">Stock In</Typography>
+                <Typography variant="h6" className="text-green-600">+{totalValues.stockIn}</Typography>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <Typography variant="subtitle2" color="textSecondary">Stock Out</Typography>
+                <Typography variant="h6" className="text-red-600">-{totalValues.stockOut}</Typography>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
             <CardContent className="p-4">
-              <Typography variant="h6" className="mb-4">Product Stock Verification</Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Product</TableCell>
-                    <TableCell>Opening Stock</TableCell>
-                    <TableCell>Stock In</TableCell>
-                    <TableCell>Stock Out</TableCell>
-                    <TableCell>Closing Stock</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {stockDay.snapshots.map((snapshot) => (
-                    <TableRow key={snapshot.id}>
-                      <TableCell>
-                        {snapshot.product.name} ({snapshot.product.size})
-                      </TableCell>
-                      <TableCell>{snapshot.openingStock}</TableCell>
-                      <TableCell>{snapshot.stockIn}</TableCell>
-                      <TableCell>{snapshot.stockOut}</TableCell>
-                      <TableCell>{snapshot.closingStock}</TableCell>
-                      <TableCell>
-                        {snapshot.isOutOfStock ? (
-                          <Chip label="Out of Stock" color="error" size="small" />
-                        ) : (
-                          <Chip label="In Stock" color="success" size="small" />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            size="small"
-                            startIcon={<Visibility />}
-                            onClick={() => handleVerifyStock(snapshot)}
-                            disabled={stockDay.status !== 'OPEN'}
-                          >
-                            Verify
-                          </Button>
-                          <Button
-                            size="small"
-                            startIcon={<Add />}
-                            onClick={() => handleAddStock(snapshot)}
-                            disabled={stockDay.status !== 'OPEN'}
-                          >
-                            Add Stock
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <Typography variant="h6" className="mb-4">Product Stock Details</Typography>
+              <Box sx={{ height: 600, width: '100%' }}>
+                <DataGrid
+                  rows={rows}
+                  columns={columns}
+                  initialState={{
+                    pagination: {
+                      paginationModel: { pageSize: 25 },
+                    },
+                  }}
+                  pageSizeOptions={[10, 25, 50, 100]}
+                  disableRowSelectionOnClick
+                  slots={{ toolbar: GridToolbar }}
+                  slotProps={{
+                    toolbar: {
+                      showQuickFilter: true,
+                      quickFilterProps: { debounceMs: 500 },
+                    },
+                  }}
+                  sx={{
+                    '& .MuiDataGrid-cell': {
+                      fontSize: '0.875rem',
+                    },
+                    '& .MuiDataGrid-columnHeader': {
+                      fontSize: '0.875rem',
+                      fontWeight: 600,
+                    },
+                  }}
+                />
+              </Box>
             </CardContent>
           </Card>
         </div>
@@ -300,6 +543,50 @@ export function StockDayManagement() {
         </Card>
       )}
 
+      {/* Close Stock Day Dialog */}
+      <Dialog open={closeDialogOpen} onClose={() => setCloseDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Close Stock Day - Confirmation Required</DialogTitle>
+        <DialogContent>
+          <div className="space-y-4 mt-2">
+            <Typography variant="h6" color="error">
+              ⚠️ Warning: This action will permanently close the stock day
+            </Typography>
+            
+            <Typography variant="body1">
+              Closing the stock day will:
+            </Typography>
+            
+            <ul className="list-disc list-inside space-y-2 ml-4">
+              <li>Calculate and store final totals from all product snapshots</li>
+              <li>Record total expected opening stock: <strong>{totalValues.openingStock} units</strong></li>
+              <li>Record total stock in: <strong>+{totalValues.stockIn} units</strong></li>
+              <li>Record total stock out: <strong>-{totalValues.stockOut} units</strong></li>
+              <li>Record total closing stock: <strong>{totalValues.closingStock} units</strong></li>
+              <li>Record total closing value: <strong>RWF {totalValues.closingValue.toLocaleString()}</strong></li>
+              <li>Mark the stock day as CLOSED - no further modifications allowed</li>
+              <li>Enable opening of a new stock day for tomorrow</li>
+            </ul>
+            
+            <Typography variant="body2" color="textSecondary">
+              This action cannot be undone. Please ensure all stock verifications are complete.
+            </Typography>
+            
+            <div className="flex justify-end gap-2 mt-6">
+              <Button onClick={() => setCloseDialogOpen(false)}>Cancel</Button>
+              <Button 
+                onClick={handleCloseStockDay} 
+                variant="contained" 
+                color="error" 
+                disabled={loading}
+              >
+                Yes, Close Stock Day
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Verify Stock Dialog */}
       <Dialog open={verifyDialogOpen} onClose={() => setVerifyDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Verify Stock</DialogTitle>
         <DialogContent>
@@ -309,7 +596,7 @@ export function StockDayManagement() {
                 Product: {selectedSnapshot.product.name} ({selectedSnapshot.product.size})
               </Typography>
               <Typography>
-                Current Opening Stock: {selectedSnapshot.openingStock}
+                Expected: {selectedSnapshot.expectedOpeningStock} units
               </Typography>
               <TextField
                 fullWidth
@@ -330,6 +617,7 @@ export function StockDayManagement() {
         </DialogContent>
       </Dialog>
 
+      {/* Add Stock Dialog */}
       <Dialog open={addStockDialogOpen} onClose={() => setAddStockDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add Stock</DialogTitle>
         <DialogContent>
@@ -348,18 +636,15 @@ export function StockDayManagement() {
               />
               <TextField
                 fullWidth
+                multiline
+                rows={3}
                 label="Reason"
                 value={addReason}
                 onChange={(e) => setAddReason(e.target.value)}
-                placeholder="e.g., New delivery, Found extra stock"
               />
               <div className="flex justify-end gap-2">
                 <Button onClick={() => setAddStockDialogOpen(false)}>Cancel</Button>
-                <Button 
-                  onClick={handleConfirmAddStock} 
-                  variant="contained" 
-                  disabled={loading || addQuantity <= 0}
-                >
+                <Button onClick={handleConfirmAddStock} variant="contained" disabled={loading || addQuantity <= 0}>
                   Add Stock
                 </Button>
               </div>

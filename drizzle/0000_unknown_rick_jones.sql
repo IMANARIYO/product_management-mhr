@@ -45,11 +45,16 @@ CREATE TABLE "daily_stock_snapshots" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"stock_day_id" uuid NOT NULL,
 	"product_id" uuid NOT NULL,
+	"expected_opening_stock" integer NOT NULL,
 	"opening_stock" integer NOT NULL,
+	"variance" integer,
 	"stock_in" integer DEFAULT 0 NOT NULL,
 	"stock_out" integer DEFAULT 0 NOT NULL,
 	"closing_stock" integer NOT NULL,
 	"is_out_of_stock" integer DEFAULT 0 NOT NULL,
+	"is_verified" integer DEFAULT 0 NOT NULL,
+	"verified_at" timestamp,
+	"verified_by" uuid,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
@@ -62,7 +67,6 @@ CREATE TABLE "products" (
 	"image" text,
 	"buying_price" numeric(10, 2) NOT NULL,
 	"selling_price" numeric(10, 2) NOT NULL,
-	"current_stock" integer DEFAULT 0 NOT NULL,
 	"status" "product_status" DEFAULT 'ACTIVE' NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
@@ -83,7 +87,6 @@ CREATE TABLE "purchase_order_items" (
 CREATE TABLE "purchase_orders" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"order_number" varchar(50) NOT NULL,
-	"supplier_name" varchar(255) NOT NULL,
 	"total_amount" numeric(12, 2) DEFAULT '0' NOT NULL,
 	"status" "purchase_order_status" DEFAULT 'DRAFT' NOT NULL,
 	"created_by" uuid NOT NULL,
@@ -120,6 +123,11 @@ CREATE TABLE "stock_days" (
 	"verified_by" uuid,
 	"closed_at" timestamp,
 	"closed_by" uuid,
+	"total_expected_opening" integer DEFAULT 0 NOT NULL,
+	"total_opening_stock" integer DEFAULT 0 NOT NULL,
+	"total_stock_in" integer DEFAULT 0 NOT NULL,
+	"total_stock_out" integer DEFAULT 0 NOT NULL,
+	"total_closing_stock" integer DEFAULT 0 NOT NULL,
 	"notes" text,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
@@ -147,6 +155,9 @@ CREATE TABLE "users" (
 	CONSTRAINT "users_phone_number_unique" UNIQUE("phone_number")
 );
 --> statement-breakpoint
+ALTER TABLE "daily_stock_snapshots" ADD CONSTRAINT "daily_stock_snapshots_stock_day_id_stock_days_id_fk" FOREIGN KEY ("stock_day_id") REFERENCES "public"."stock_days"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "daily_stock_snapshots" ADD CONSTRAINT "daily_stock_snapshots_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "daily_stock_snapshots" ADD CONSTRAINT "daily_stock_snapshots_verified_by_users_id_fk" FOREIGN KEY ("verified_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "products" ADD CONSTRAINT "products_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "stock_actions" ADD CONSTRAINT "stock_actions_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "stock_actions" ADD CONSTRAINT "stock_actions_done_by_users_id_fk" FOREIGN KEY ("done_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

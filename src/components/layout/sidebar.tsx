@@ -15,6 +15,11 @@ import {
   Activity,
   Glasses,
   Calendar,
+  ChevronsLeft,
+  ChevronsRight,
+  User,
+  CreditCard,
+  FileText,
 } from 'lucide-react';
 import { logoutUser } from '@/app/actions/auth';
 import { cn } from '@/lib/utils';
@@ -29,10 +34,17 @@ interface SidebarProps {
   user: User;
 }
 
+type SidebarState = 'full' | 'icons' | 'hidden';
+
 import { LucideIcon } from 'lucide-react';
 
-// Move NavItems outside of component to avoid creating during render
-function NavItems({ menuItems, pathname, isAdmin, onItemClick }: {
+function NavItems({ 
+  menuItems, 
+  pathname, 
+  isAdmin, 
+  onItemClick, 
+  sidebarState 
+}: {
   menuItems: Array<{
     href: string;
     label: string;
@@ -42,6 +54,7 @@ function NavItems({ menuItems, pathname, isAdmin, onItemClick }: {
   pathname: string;
   isAdmin: boolean;
   onItemClick: () => void;
+  sidebarState: SidebarState;
 }) {
   return (
     <nav className="space-y-2">
@@ -54,11 +67,18 @@ function NavItems({ menuItems, pathname, isAdmin, onItemClick }: {
           <Link key={item.href} href={item.href}>
             <Button
               variant={isActive ? 'default' : 'ghost'}
-              className="w-full justify-start"
+              className={cn(
+                'w-full justify-start',
+                sidebarState === 'icons' && 'justify-center px-2'
+              )}
               onClick={onItemClick}
+              title={sidebarState === 'icons' ? item.label : undefined}
             >
-              <Icon className="mr-2 h-4 w-4" />
-              {item.label}
+              <Icon className={cn(
+                'h-4 w-4',
+                sidebarState === 'full' && 'mr-2'
+              )} />
+              {sidebarState === 'full' && item.label}
             </Button>
           </Link>
         );
@@ -69,7 +89,8 @@ function NavItems({ menuItems, pathname, isAdmin, onItemClick }: {
 
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarState, setSidebarState] = useState<SidebarState>('full');
 
   const isAdmin = user?.role === 'ADMIN';
 
@@ -81,15 +102,21 @@ export function Sidebar({ user }: SidebarProps) {
       adminOnly: false,
     },
     {
-      href: '/products',
+      href: '/dashboard/products',
       label: 'Products',
       icon: Package,
       adminOnly: false,
     },
     {
-      href: '/stock',
+      href: '/dashboard/stock',
       label: 'Stock Management',
       icon: ShoppingCart,
+      adminOnly: false,
+    },
+    {
+      href: '/dashboard/stock-days',
+      label: 'Stock Days',
+      icon: Calendar,
       adminOnly: false,
     },
     {
@@ -99,13 +126,13 @@ export function Sidebar({ user }: SidebarProps) {
       adminOnly: false,
     },
     {
-      href: '/credits',
+      href: '/dashboard/credits',
       label: 'Credit Sales',
-      icon: Glasses,
+      icon: CreditCard,
       adminOnly: false,
     },
     {
-      href: '/activity',
+      href: '/dashboard/activity',
       label: 'My Activity',
       icon: Activity,
       adminOnly: false,
@@ -113,15 +140,15 @@ export function Sidebar({ user }: SidebarProps) {
     ...(isAdmin
       ? [
           {
-            href: '/users',
+            href: '/dashboard/users',
             label: 'Users',
             icon: Users,
             adminOnly: true,
           },
           {
-            href: '/reports',
+            href: '/dashboard/reports',
             label: 'Reports',
-            icon: BarChart3,
+            icon: FileText,
             adminOnly: true,
           },
         ]
@@ -132,6 +159,14 @@ export function Sidebar({ user }: SidebarProps) {
     await logoutUser();
   };
 
+  const toggleSidebar = () => {
+    if (sidebarState === 'full') setSidebarState('icons');
+    else if (sidebarState === 'icons') setSidebarState('hidden');
+    else setSidebarState('full');
+  };
+
+  const sidebarWidth = sidebarState === 'full' ? 'w-64' : sidebarState === 'icons' ? 'w-16' : 'w-0';
+
   return (
     <>
       {/* Mobile toggle button */}
@@ -139,9 +174,9 @@ export function Sidebar({ user }: SidebarProps) {
         <Button
           variant="outline"
           size="icon"
-          onClick={() => setOpen(!open)}
+          onClick={() => setMobileOpen(!mobileOpen)}
         >
-          {open ? (
+          {mobileOpen ? (
             <X className="h-4 w-4" />
           ) : (
             <Menu className="h-4 w-4" />
@@ -150,22 +185,20 @@ export function Sidebar({ user }: SidebarProps) {
       </div>
 
       {/* Mobile overlay */}
-      {open && (
+      {mobileOpen && (
         <div
           className="fixed inset-0 bg-black/50 lg:hidden z-40"
-          onClick={() => setOpen(false)}
+          onClick={() => setMobileOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
+      {/* Mobile Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-40 w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col overflow-y-auto',
-          'lg:translate-x-0 lg:static lg:h-auto',
-          open ? 'translate-x-0' : '-translate-x-full'
+          'fixed left-0 top-0 z-40 w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col overflow-y-auto lg:hidden',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        {/* Logo area */}
         <div className="p-6 border-b border-sidebar-border">
           <h1 className="text-2xl font-bold text-sidebar-foreground flex items-center gap-2">
             <Glasses className="h-6 w-6" />
@@ -174,17 +207,16 @@ export function Sidebar({ user }: SidebarProps) {
           <p className="text-xs text-muted-foreground mt-2">Rwanda</p>
         </div>
 
-        {/* Navigation */}
         <div className="flex-1 p-6">
           <NavItems 
             menuItems={menuItems}
             pathname={pathname}
             isAdmin={isAdmin}
-            onItemClick={() => setOpen(false)}
+            onItemClick={() => setMobileOpen(false)}
+            sidebarState="full"
           />
         </div>
 
-        {/* User info and logout */}
         <div className="p-6 border-t border-sidebar-border">
           <div className="mb-4 p-3 bg-sidebar-accent rounded-lg">
             <p className="text-xs font-medium text-sidebar-accent-foreground">
@@ -202,6 +234,117 @@ export function Sidebar({ user }: SidebarProps) {
           </Button>
         </div>
       </aside>
+
+      {/* Desktop Sidebar */}
+      <aside
+        className={cn(
+          'hidden lg:flex fixed left-0 top-0 z-40 h-screen bg-sidebar border-r border-sidebar-border flex-col overflow-y-auto transition-all duration-300',
+          sidebarWidth,
+          sidebarState === 'hidden' && 'border-r-0'
+        )}
+      >
+        {sidebarState !== 'hidden' && (
+          <>
+            {/* Logo area */}
+            <div className={cn(
+              'p-6 border-b border-sidebar-border',
+              sidebarState === 'icons' && 'p-4'
+            )}>
+              {sidebarState === 'full' ? (
+                <>
+                  <h1 className="text-2xl font-bold text-sidebar-foreground flex items-center gap-2">
+                    <Glasses className="h-6 w-6" />
+                    Bar Manager
+                  </h1>
+                  <p className="text-xs text-muted-foreground mt-2">Rwanda</p>
+                </>
+              ) : (
+                <div className="flex justify-center">
+                  <Glasses className="h-6 w-6 text-sidebar-foreground" />
+                </div>
+              )}
+            </div>
+
+            {/* Navigation */}
+            <div className={cn(
+              'flex-1 p-6',
+              sidebarState === 'icons' && 'p-4'
+            )}>
+              <NavItems 
+                menuItems={menuItems}
+                pathname={pathname}
+                isAdmin={isAdmin}
+                onItemClick={() => {}}
+                sidebarState={sidebarState}
+              />
+            </div>
+
+            {/* User info and logout */}
+            <div className={cn(
+              'p-6 border-t border-sidebar-border',
+              sidebarState === 'icons' && 'p-4'
+            )}>
+              {sidebarState === 'full' ? (
+                <>
+                  <div className="mb-4 p-3 bg-sidebar-accent rounded-lg">
+                    <p className="text-xs font-medium text-sidebar-accent-foreground">
+                      {user?.fullName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{user?.role}</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start bg-transparent"
+                    onClick={handleLogout}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full"
+                    title={user?.fullName}
+                  >
+                    <User className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full"
+                    onClick={handleLogout}
+                    title="Logout"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </aside>
+
+      {/* Toggle button for desktop */}
+      <Button
+        variant="outline"
+        size="icon"
+        className={cn(
+          'hidden lg:flex fixed top-4 z-50 transition-all duration-300',
+          sidebarState === 'full' && 'left-60',
+          sidebarState === 'icons' && 'left-12',
+          sidebarState === 'hidden' && 'left-4'
+        )}
+        onClick={toggleSidebar}
+      >
+        {sidebarState === 'hidden' ? (
+          <ChevronsRight className="h-4 w-4" />
+        ) : (
+          <ChevronsLeft className="h-4 w-4" />
+        )}
+      </Button>
     </>
   );
 }

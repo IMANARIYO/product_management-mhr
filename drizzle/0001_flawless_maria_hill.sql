@@ -1,1 +1,0 @@
-ALTER TABLE "products" DROP COLUMN "current_stock";

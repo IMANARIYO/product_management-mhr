@@ -7,10 +7,7 @@ import { useState, useEffect } from 'react';
 import { getCurrentUser } from '@/app/actions/auth';
 import { getProducts } from '@/app/actions/products';
 import {
-  addStockAction,
-  sellProductAction,
-  recordBrokenAction,
-  countStockAction,
+  handleStockAction,
   getStockActionsAction,
 } from '@/app/actions/stock';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -86,35 +83,13 @@ export default function StockPage() {
 
     setLoading(true);
     try {
-      let result;
-      switch (actionType) {
-        case 'STOCK_IN':
-          result = await addStockAction(
-            selectedProduct,
-            parseInt(formData.quantity),
-            formData.supplier
-          );
-          break;
-        case 'SOLD':
-          result = await sellProductAction(
-            selectedProduct,
-            parseInt(formData.quantity)
-          );
-          break;
-        case 'BROKEN':
-          result = await recordBrokenAction(
-            selectedProduct,
-            parseInt(formData.quantity),
-            formData.reason
-          );
-          break;
-        case 'COUNTED':
-          result = await countStockAction(
-            selectedProduct,
-            parseInt(formData.quantity)
-          );
-          break;
-      }
+      const result = await handleStockAction({
+        productId: selectedProduct,
+        actionType,
+        quantity: parseInt(formData.quantity),
+        supplier: formData.supplier || undefined,
+        reason: formData.reason || undefined,
+      });
 
       if (result?.success) {
         const productsResult = await getProducts(false);
