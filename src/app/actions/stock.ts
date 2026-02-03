@@ -134,6 +134,7 @@ export async function handleStockAction({
             closingStock: snapshot.closingStock + quantity,
             isOutOfStock: snapshot.closingStock + quantity > 0 ? 0 : 1,
           };
+
           break;
 
         case "SOLD":
@@ -241,9 +242,9 @@ export async function handleStockAction({
       console.log(
         `[STOCK_ACTION_SUCCESS] ${actionType} completed successfully`
       );
-      
-      revalidatePath('/dashboard/stock');
-      
+
+      revalidatePath("/dashboard/stock");
+
       return {
         success: true,
         action: newAction,
@@ -252,8 +253,8 @@ export async function handleStockAction({
         toast: {
           type: "success" as const,
           title: "Stock Updated",
-          message: `${actionType} completed successfully. ${quantity} units processed.`
-        }
+          message: `${actionType} completed successfully. ${quantity} units processed.`,
+        },
       };
     });
   } catch (error) {
@@ -261,17 +262,18 @@ export async function handleStockAction({
       `[STOCK_ACTION_TRANSACTION_ERROR] ${actionType} failed:`,
       error
     );
-    
-    const errorMessage = error instanceof Error ? error.message : "Failed to process stock action";
-    
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to process stock action";
+
     return {
       success: false,
       error: errorMessage,
       toast: {
         type: "error" as const,
         title: "Stock Action Failed",
-        message: errorMessage
-      }
+        message: errorMessage,
+      },
     };
   }
 }
