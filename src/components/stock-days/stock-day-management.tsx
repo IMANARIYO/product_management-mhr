@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { getCurrentUserAction } from '@/app/actions/profile';
 import { initializeStockDay, verifyProductStock, verifyStockDay as verifyStockDayInit } from '@/app/actions/stock-day-init';
 import { closeCurrentStockDay } from '@/app/actions/stock-day-close';
+import { handleStockAction } from '@/app/actions/stock';
 import { StockDayStatus } from '@/db/types';
 
 interface StockSnapshot {
@@ -146,9 +147,21 @@ export function StockDayManagement() {
 
     setLoading(true);
     try {
-      toast.success('Stock add functionality not implemented yet');
-      setAddStockDialogOpen(false);
-      setSelectedSnapshot(null);
+      const result = await handleStockAction({
+        productId: selectedSnapshot.productId,
+        actionType: 'STOCK_IN',
+        quantity: addQuantity,
+        reason: addReason || 'Stock adjustment during stock day'
+      });
+
+      if (result.success) {
+        toast.success('Stock added successfully');
+        setAddStockDialogOpen(false);
+        setSelectedSnapshot(null);
+        fetchData();
+      } else {
+        toast.error(result.toast?.message || 'Failed to add stock');
+      }
     } catch (error) {
       console.error('Error adding stock:', error);
       toast.error('Failed to add stock');
