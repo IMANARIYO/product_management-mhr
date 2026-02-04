@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCurrentUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
 import { getProducts } from '@/app/actions/products';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
@@ -57,14 +57,14 @@ export default function DashboardProductsPage() {
       setLoading(true);
       try {
         // Get current user first
-        const currentUser = await getCurrentUser();
-        if (!currentUser) {
+        const userResult = await getCurrentUserAction();
+        if (!userResult.success || !userResult.user) {
           toast.error('Please log in to access this page');
           return;
         }
         
-        console.log('Current user:', currentUser);
-        setUser(currentUser as CurrentUser);
+        console.log('Current user:', userResult.user);
+        setUser(userResult.user as CurrentUser);
 
         // Then fetch products
         await fetchProducts();

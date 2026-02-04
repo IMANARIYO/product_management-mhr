@@ -1,34 +1,33 @@
 import { db } from '../src/index';
 import { users } from '../src/db/schema';
-import { hashPassword } from '../src/lib/auth';
 
 async function setup() {
   try {
     console.log('Setting up database...');
     
-    // Create admin user
-    const adminPasswordHash = await hashPassword('admin123');
-    const employeePasswordHash = await hashPassword('employee123');
-    
     // Insert admin user
     await db.insert(users).values({
+      firstName: 'Admin',
       fullName: 'System Administrator',
+      email: 'admin@bar.com',
       phoneNumber: '+250788111111',
-      passwordHash: adminPasswordHash,
+      password: 'admin123',
       role: 'ADMIN',
     }).onConflictDoNothing();
     
     // Insert employee user
     await db.insert(users).values({
+      firstName: 'Employee',
       fullName: 'Test Employee',
+      email: 'employee@bar.com',
       phoneNumber: '+250788222222',
-      passwordHash: employeePasswordHash,
+      password: 'employee123',
       role: 'EMPLOYEE',
     }).onConflictDoNothing();
     
     console.log('Database setup completed successfully!');
-    console.log('Admin credentials: +250788111111 / admin123');
-    console.log('Employee credentials: +250788222222 / employee123');
+    console.log('Admin login: +250788111111 / admin123');
+    console.log('Employee login: +250788222222 / employee123');
     
   } catch (error) {
     console.error('Setup failed:', error);

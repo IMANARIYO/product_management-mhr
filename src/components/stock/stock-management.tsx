@@ -5,7 +5,7 @@ import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { Select, MenuItem, TextField, Button, Card, CardContent, Typography, Switch, FormControlLabel, Tabs, Tab, Box, InputAdornment } from '@mui/material';
 import { Search } from 'lucide-react';
 import { Product, StockActionType } from '@/db/types';
-import { getCurrentUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
 import { handleStockAction } from '@/app/actions/stock';
 import { useToastHandler } from '@/hooks/use-toast-handler';
 
@@ -41,9 +41,9 @@ export function StockManagement({ products }: StockManagementProps) {
 
   useEffect(() => {
     const fetchUser = async () => {
-      const user = await getCurrentUser();
-      if (user) {
-        setUserRole(user.role);
+      const userResult = await getCurrentUserAction();
+      if (userResult.success && userResult.user) {
+        setUserRole(userResult.user.role);
       }
     };
     fetchUser();

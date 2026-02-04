@@ -5,7 +5,7 @@ import { Card, CardContent, Typography, Button, Chip, Dialog, DialogTitle, Dialo
 import { DataGrid, GridColDef, GridRenderCellParams, GridToolbar } from '@mui/x-data-grid';
 import { Add, CheckCircle, Visibility } from '@mui/icons-material';
 import { toast } from 'sonner';
-import { getCurrentUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
 import { initializeStockDay, verifyProductStock, verifyStockDay as verifyStockDayInit } from '@/app/actions/stock-day-init';
 import { closeCurrentStockDay } from '@/app/actions/stock-day-close';
 import { StockDayStatus } from '@/db/types';
@@ -72,8 +72,10 @@ export function StockDayManagement() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const userResult = await getCurrentUser();
-      if (userResult) setUser(userResult as CurrentUser);
+      const userResult = await getCurrentUserAction();
+      if (userResult.success && userResult.user) {
+        setUser(userResult.user as CurrentUser);
+      }
 
       const today = new Date();
       const result = await initializeStockDay(today);

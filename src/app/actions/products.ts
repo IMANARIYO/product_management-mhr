@@ -1,8 +1,8 @@
 "use server";
 
-import { eq, sum, and } from "drizzle-orm";
+import { eq, sum, and, or } from "drizzle-orm";
 import { getSession, requireAuth } from "@/lib/auth-middleware";
-import { activityLogs, products, stocks, stockActions } from "@/db/schema";
+import { activityLogs, products, stocks, stockActions, purchaseOrders, purchaseOrderItems } from "@/db/schema";
 import { db } from "@/index";
 import {
   NewProduct,
@@ -10,6 +10,7 @@ import {
   productTypeValues,
   ProductType,
 } from "@/db/types";
+import { revalidatePath } from "next/cache";
 
 // Validation helpers
 function validateProductData(data: {
@@ -125,16 +126,54 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
   try {
     const session = await requireAuth();
     if (!session) {
-      return { success: false, error: "Unauthorized" };
+      return { 
+        success: false, 
+        error: "Unauthorized",
+        toast: {
+          type: "error" as const,
+          title: "Access Denied",
+          message: "You are not authorized to edit products"
+        }
+      };
     }
 
     // Check if product exists
     const existingProduct = await db.query.products.findFirst({
       where: eq(products.id, productId),
+      with: {
+        stocks: true
+      }
     });
 
     if (!existingProduct) {
-      return { success: false, error: "Product not found" };
+      return { 
+        success: false, 
+        error: "Product not found",
+        toast: {
+          type: "error" as const,
+          title: "Product Not Found",
+          message: "The product you're trying to edit doesn't exist"
+        }
+      };
+    }
+
+    // Calculate current stock
+    const currentStock = existingProduct.stocks.reduce(
+      (total, stock) => total + stock.quantity,
+      0
+    );
+
+    // Check if trying to archive product with stock
+    if (data.status === "ARCHIVED" && existingProduct.status === "ACTIVE" && currentStock > 0) {
+      return {
+        success: false,
+        error: `Cannot archive product with existing stock. Current stock: ${currentStock} units`,
+        toast: {
+          type: "warning" as const,
+          title: "Cannot Archive Product",
+          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before archiving.`
+        }
+      };
     }
 
     // Validate updated data if provided
@@ -155,7 +194,15 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
 
       const validationErrors = validateProductData(validationData);
       if (validationErrors.length > 0) {
-        return { success: false, error: validationErrors.join(", ") };
+        return { 
+          success: false, 
+          error: validationErrors.join(", "),
+          toast: {
+            type: "error" as const,
+            title: "Validation Error",
+            message: validationErrors.join(", ")
+          }
+        };
       }
 
       // Check for duplicate if name/type/size changed
@@ -170,31 +217,178 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
           return {
             success: false,
             error: `Product already exists: ${validationData.name} ${validationData.size} (${validationData.type})`,
+            toast: {
+              type: "error" as const,
+              title: "Duplicate Product",
+              message: `A product with this name, type, and size already exists`
+            }
           };
         }
       }
     }
 
-    // Update with system-controlled timestamp
-    const updateData = {
-      ...data,
-      updatedAt: new Date(),
-    };
+    // Check for price changes and calculate impact
+    const priceChanges: Array<{
+      field: string;
+      oldValue: string;
+      newValue: string;
+      change: string;
+    }> = [];
+    let hasSignificantPriceChange = false;
+    let hasNegativeMargin = false;
+    
+    if (data.buyingPrice && data.buyingPrice !== existingProduct.buyingPrice) {
+      const oldPrice = parseFloat(existingProduct.buyingPrice);
+      const newPrice = parseFloat(data.buyingPrice);
+      const change = newPrice - oldPrice;
+      const percentChange = Math.abs(change / oldPrice) * 100;
+      
+      priceChanges.push({
+        field: "buyingPrice",
+        oldValue: existingProduct.buyingPrice,
+        newValue: data.buyingPrice,
+        change: change.toFixed(2)
+      });
+      
+      if (percentChange > 20) {
+        hasSignificantPriceChange = true;
+      }
+    }
 
-    await db.update(products).set(updateData).where(eq(products.id, productId));
+    if (data.sellingPrice && data.sellingPrice !== existingProduct.sellingPrice) {
+      const oldPrice = parseFloat(existingProduct.sellingPrice);
+      const newPrice = parseFloat(data.sellingPrice);
+      const change = newPrice - oldPrice;
+      const percentChange = Math.abs(change / oldPrice) * 100;
+      
+      priceChanges.push({
+        field: "sellingPrice",
+        oldValue: existingProduct.sellingPrice,
+        newValue: data.sellingPrice,
+        change: change.toFixed(2)
+      });
+      
+      if (percentChange > 20) {
+        hasSignificantPriceChange = true;
+      }
+    }
 
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "UPDATE_PRODUCT",
-      entityType: "PRODUCT",
-      entityId: productId,
-      details: `Updated product: ${existingProduct.name}`,
+    // Check for negative margin
+    const finalBuyingPrice = parseFloat(data.buyingPrice || existingProduct.buyingPrice);
+    const finalSellingPrice = parseFloat(data.sellingPrice || existingProduct.sellingPrice);
+    
+    if (finalSellingPrice <= finalBuyingPrice) {
+      hasNegativeMargin = true;
+    }
+
+    // Check for active purchase orders
+    const activePurchaseOrders = await db.query.purchaseOrders.findMany({
+      where: and(
+        eq(purchaseOrderItems.productId, productId),
+        or(
+          eq(purchaseOrders.status, "DRAFT"),
+          eq(purchaseOrders.status, "SUBMITTED"),
+          eq(purchaseOrders.status, "CONFIRMED")
+        )
+      ),
+      with: {
+        items: {
+          where: eq(purchaseOrderItems.productId, productId)
+        }
+      }
     });
 
-    return { success: true };
+    await db.transaction(async (tx) => {
+      // Update with system-controlled timestamp
+      const updateData = {
+        ...data,
+        updatedAt: new Date(),
+      };
+
+      await tx.update(products).set(updateData).where(eq(products.id, productId));
+
+      // Create detailed activity log
+      const activityDetails = {
+        user: {
+          id: session.userId,
+          fullName: session.fullName || "Unknown",
+          role: session.role
+        },
+        product: {
+          id: productId,
+          name: existingProduct.name
+        },
+        changes: priceChanges,
+        warnings: [] as string[],
+        stockInfo: {
+          currentStock,
+          hasStock: currentStock > 0
+        },
+        activePurchaseOrders: activePurchaseOrders.length
+      };
+
+      if (hasSignificantPriceChange) {
+        activityDetails.warnings.push("Price change exceeds 20% threshold");
+      }
+      
+      if (hasNegativeMargin) {
+        activityDetails.warnings.push("Negative profit margin detected");
+      }
+      
+      if (activePurchaseOrders.length > 0) {
+        activityDetails.warnings.push(`${activePurchaseOrders.length} active purchase orders affected`);
+      }
+
+      await tx.insert(activityLogs).values({
+        userId: session.userId,
+        action: "UPDATE_PRODUCT",
+        entityType: "PRODUCT",
+        entityId: productId,
+        details: JSON.stringify(activityDetails),
+      });
+    });
+
+    // Prepare success message with change summary
+    let successMessage = `Product updated successfully`;
+    if (priceChanges.length > 0) {
+      const changesSummary = priceChanges.map(change => 
+        `${change.field}: ${change.oldValue} → ${change.newValue} (${parseFloat(change.change) > 0 ? '+' : ''}${change.change})`
+      ).join(', ');
+      successMessage += `. Changes: ${changesSummary}`;
+    }
+
+    const warnings: string[] = [];
+    if (hasNegativeMargin) {
+      warnings.push("Warning: Selling price is not higher than buying price");
+    }
+    if (activePurchaseOrders.length > 0) {
+      warnings.push(`${activePurchaseOrders.length} active purchase orders will use old prices`);
+    }
+
+    revalidatePath('/dashboard/products');
+    
+    return { 
+      success: true,
+      priceChanges,
+      warnings,
+      currentStock,
+      toast: {
+        type: hasNegativeMargin ? "warning" as const : "success" as const,
+        title: "Product Updated",
+        message: successMessage + (warnings.length > 0 ? `. ${warnings.join('. ')}` : '')
+      }
+    };
   } catch (error) {
     console.error("Update product error:", error);
-    return { success: false, error: "Failed to update product" };
+    return { 
+      success: false, 
+      error: "Failed to update product",
+      toast: {
+        type: "error" as const,
+        title: "Update Failed",
+        message: "An error occurred while updating the product"
+      }
+    };
   }
 }
 

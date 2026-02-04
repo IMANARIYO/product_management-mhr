@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client';
 
 import { useState } from 'react';
@@ -17,7 +16,10 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const result = await loginUser(phoneNumber, password);
+      const formData = new FormData();
+      formData.append('phoneNumber', phoneNumber);
+      formData.append('password', password);
+      const result = await loginUser(formData);
 
       if (result.success) {
         toast.success('Login successful!');
@@ -26,6 +28,7 @@ export default function LoginPage() {
         toast.error(result.error || 'Login failed');
       }
     } catch (error) {
+      console.error('Login error:', error);
       toast.error('An error occurred during login');
     } finally {
       setLoading(false);

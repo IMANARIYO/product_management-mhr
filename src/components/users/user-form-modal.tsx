@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createUser, updateUser } from '@/app/actions/auth';
+import { createUser, updateUser } from '@/app/actions/users';
 import { toast } from 'sonner';
 
 interface User {
@@ -60,18 +60,18 @@ export function UserFormModal({ isOpen, onClose, user, onSuccess }: UserFormModa
     try {
       let result;
       if (isEditing && user) {
-        result = await updateUser(
-          user.id,
-          formData.fullName,
-          formData.role
-        );
+        const updateFormData = new FormData();
+        updateFormData.append('id', user.id);
+        updateFormData.append('fullName', formData.fullName);
+        updateFormData.append('role', formData.role);
+        result = await updateUser(updateFormData);
       } else {
-        result = await createUser(
-          formData.fullName,
-          formData.phoneNumber,
-          formData.password,
-          formData.role
-        );
+        const createFormData = new FormData();
+        createFormData.append('fullName', formData.fullName);
+        createFormData.append('phoneNumber', formData.phoneNumber);
+        createFormData.append('password', formData.password);
+        createFormData.append('role', formData.role);
+        result = await createUser(createFormData);
       }
 
       if (result.success) {
@@ -79,7 +79,7 @@ export function UserFormModal({ isOpen, onClose, user, onSuccess }: UserFormModa
         onSuccess();
         onClose();
       } else {
-        toast.error(result.error || 'Operation failed');
+        toast.error(result.toast?.description || 'Operation failed');
       }
     } catch (error) {
       toast.error('An error occurred');

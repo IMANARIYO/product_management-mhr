@@ -6,7 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { getCurrentUser, updateUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
+import { updateUser } from '@/app/actions/users';
 import { logoutUser } from '@/app/actions/auth';
 import { toast } from 'sonner';
 import { User, Phone, Shield, LogOut, Edit3, Save, X } from 'lucide-react';
@@ -26,7 +27,9 @@ interface ProfileModalProps {
 
 interface UserDetails {
   id: string;
+  firstName: string;
   fullName: string;
+  email: string;
   phoneNumber: string;
   role: 'ADMIN' | 'EMPLOYEE';
 }
@@ -48,12 +51,14 @@ export function ProfileModal({ isOpen, onClose, session }: ProfileModalProps) {
 
   const loadUserDetails = async () => {
     try {
-      const user = await getCurrentUser();
-      if (user) {
-        setUserDetails(user);
+      const result = await getCurrentUserAction();
+      if (result.success && result.user) {
+        setUserDetails(result.user);
         setEditForm({
-          fullName: user.fullName,
+          fullName: result.user.fullName,
         });
+      } else {
+        toast.error('Failed to load profile');
       }
     } catch (error) {
       toast.error('Failed to load profile');
@@ -63,17 +68,21 @@ export function ProfileModal({ isOpen, onClose, session }: ProfileModalProps) {
   const handleSave = async () => {
     setIsLoading(true);
     try {
-      const result = await updateUser(
-        session.userId,
-        editForm.fullName
-      );
+      const formData = new FormData();
+      formData.append('userId', session.userId);
+      formData.append('firstName', editForm.fullName.split(' ')[0] || '');
+      formData.append('fullName', editForm.fullName);
+      formData.append('email', userDetails?.email || '');
+      formData.append('phoneNumber', userDetails?.phoneNumber || '');
+
+      const result = await updateUser(formData);
 
       if (result.success) {
         toast.success('Profile updated successfully');
         setIsEditing(false);
         loadUserDetails();
       } else {
-        toast.error(result.error || 'Failed to update profile');
+        toast.error(result.toast?.description || 'Failed to update profile');
       }
     } catch (error) {
       toast.error('An error occurred');

@@ -3,18 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DataGrid, GridColDef, GridActionsCellItem } from '@mui/x-data-grid';
 import { Button, Select, MenuItem, FormControl, InputLabel, Chip, Box } from '@mui/material';
-import { Add, Visibility, Edit, Delete, FileCopy, Archive, CheckCircle, Cancel } from '@mui/icons-material';
+import { Add, Visibility, Edit, Delete, FileCopy, CheckCircle, Cancel } from '@mui/icons-material';
 import { toast } from 'sonner';
-import { getCurrentUser } from '@/app/actions/auth';
-import { 
-  getPurchaseOrders, 
-  submitPurchaseOrder, 
-  approvePurchaseOrder, 
-  receivePurchaseOrder, 
-  cancelPurchaseOrder,
-  deletePurchaseOrder,
-  copyPurchaseOrder,
-  archivePurchaseOrder
+import { getCurrentUserAction } from '@/app/actions/profile';
+import {
+  getPurchaseOrders,
+  submitPurchaseOrder,
+  cancelPurchaseOrder
 } from '@/app/actions/purchase-orders';
 import { PurchaseOrderStatus } from '@/db/types';
 
@@ -22,7 +17,8 @@ interface PurchaseOrder {
   id: string;
   orderNumber: string;
   supplierName?: string;
-  totalAmount: string;
+  totalAmount?: string;
+  totalCost?: string;
   status: PurchaseOrderStatus;
   createdAt: Date;
   submittedAt?: Date | null;
@@ -60,13 +56,13 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
     setLoading(true);
     try {
       const [userResult, ordersResult] = await Promise.all([
-        getCurrentUser(),
+        getCurrentUserAction(),
         getPurchaseOrders(statusFilter || undefined)
       ]);
 
-      if (userResult) setUserRole(userResult.role);
+      if (userResult.success && userResult.user) setUserRole(userResult.user.role);
       if (ordersResult.success && ordersResult.orders) {
-        setOrders(ordersResult.orders as PurchaseOrder[]);
+        setOrders(ordersResult.orders as unknown as PurchaseOrder[]);
       }
     } catch {
       toast.error('Failed to fetch data');
@@ -80,11 +76,13 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
   }, [fetchData]);
 
   const getStatusColor = (status: PurchaseOrderStatus) => {
-    const colors = {
+    const colors: Record<PurchaseOrderStatus, 'default' | 'primary' | 'success' | 'info' | 'error'> = {
       DRAFT: 'default',
       SUBMITTED: 'primary',
-      APPROVED: 'success',
-      RECEIVED: 'info',
+      CONFIRMED: 'success',
+      EXECUTED_AT_MARKET: 'info',
+      REJECTED_FOR_STOCK: 'error',
+      STOCK_ENTERED: 'success',
       CANCELLED: 'error'
     };
     return colors[status] || 'default';
@@ -98,25 +96,11 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
         case 'submit':
           result = await submitPurchaseOrder(orderId);
           break;
-        case 'approve':
-          result = await approvePurchaseOrder(orderId);
-          break;
-        case 'receive':
-          result = await receivePurchaseOrder(orderId);
-          break;
         case 'cancel':
           result = await cancelPurchaseOrder(orderId);
           break;
-        case 'delete':
-          result = await deletePurchaseOrder(orderId);
-          break;
-        case 'copy':
-          result = await copyPurchaseOrder(orderId);
-          break;
-        case 'archive':
-          result = await archivePurchaseOrder(orderId);
-          break;
         default:
+          toast.error('Action not implemented');
           return;
       }
 
@@ -135,9 +119,9 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
 
   const columns: GridColDef[] = [
     { field: 'orderNumber', headerName: 'Order #', width: 120 },
-    { 
-      field: 'supplierName', 
-      headerName: 'Supplier', 
+    {
+      field: 'supplierName',
+      headerName: 'Supplier',
       width: 150,
       renderCell: (params) => params.value || 'N/A'
     },
@@ -145,15 +129,18 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
       field: 'totalAmount',
       headerName: 'Total',
       width: 120,
-      renderCell: (params) => `RWF ${parseFloat(params.value).toLocaleString()}`
+      renderCell: (params) => {
+        const amount = params.value || params.row.totalCost || '0';
+        return `RWF ${parseFloat(amount).toLocaleString()}`;
+      }
     },
     {
       field: 'status',
       headerName: 'Status',
       width: 120,
       renderCell: (params) => (
-        <Chip 
-          label={params.value} 
+        <Chip
+          label={params.value}
           color={getStatusColor(params.value) as 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning'}
           size="small"
         />
@@ -226,43 +213,32 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
         if (status === 'SUBMITTED' && userRole === 'ADMIN') {
           actions.push(
             <GridActionsCellItem
-              key="approve"
+              key="confirm"
               icon={<CheckCircle />}
-              label="Approve"
-              onClick={() => handleAction('approve', params.id as string)}
+              label="Confirm"
+              onClick={() => toast.info('Confirm action not implemented')}
             />
           );
         }
 
-        if (status === 'APPROVED' && userRole === 'ADMIN') {
+        if (status === 'CONFIRMED' && userRole === 'ADMIN') {
           actions.push(
             <GridActionsCellItem
-              key="receive"
+              key="execute"
               icon={<CheckCircle />}
-              label="Receive"
-              onClick={() => handleAction('receive', params.id as string)}
+              label="Execute"
+              onClick={() => toast.info('Execute action not implemented')}
             />
           );
         }
 
-        if (status !== 'RECEIVED' && status !== 'CANCELLED') {
+        if (status !== 'STOCK_ENTERED' && status !== 'CANCELLED') {
           actions.push(
             <GridActionsCellItem
               key="cancel"
               icon={<Cancel />}
               label="Cancel"
               onClick={() => onCancel?.(params.id as string)}
-            />
-          );
-        }
-
-        if (userRole === 'ADMIN') {
-          actions.push(
-            <GridActionsCellItem
-              key="archive"
-              icon={<Archive />}
-              label="Archive"
-              onClick={() => handleAction('archive', params.id as string)}
             />
           );
         }
@@ -296,8 +272,10 @@ export function PurchaseOrderTable({ onView, onEdit, onDelete, onCancel }: {
             <MenuItem value="">All Statuses</MenuItem>
             <MenuItem value="DRAFT">Draft</MenuItem>
             <MenuItem value="SUBMITTED">Submitted</MenuItem>
-            <MenuItem value="APPROVED">Approved</MenuItem>
-            <MenuItem value="RECEIVED">Received</MenuItem>
+            <MenuItem value="CONFIRMED">Confirmed</MenuItem>
+            <MenuItem value="EXECUTED_AT_MARKET">Executed at Market</MenuItem>
+            <MenuItem value="REJECTED_FOR_STOCK">Rejected for Stock</MenuItem>
+            <MenuItem value="STOCK_ENTERED">Stock Entered</MenuItem>
             <MenuItem value="CANCELLED">Cancelled</MenuItem>
           </Select>
         </FormControl>

@@ -6,7 +6,6 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { UserFormModal } from './user-form-modal';
-import { disableUser, enableUser } from '@/app/actions/auth';
 import { toast } from 'sonner';
 import { Pencil, UserX, UserCheck, Plus, Eye, Users, User } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -49,13 +48,9 @@ export function UsersManager({ users, currentUserRole, onRefresh }: UsersManager
   const handleDisableUser = async (userId: string) => {
     if (confirm('Are you sure you want to disable this user?')) {
       try {
-        const result = await disableUser(userId);
-        if (result.success) {
-          toast.success('User disabled successfully');
-          onRefresh();
-        } else {
-          toast.error(result.error || 'Failed to disable user');
-        }
+        // TODO: Implement disableUser action
+        toast.info('Disable user functionality not implemented yet');
+        // onRefresh();
       } catch (error) {
         toast.error('An error occurred');
       }
@@ -64,13 +59,9 @@ export function UsersManager({ users, currentUserRole, onRefresh }: UsersManager
 
   const handleEnableUser = async (userId: string) => {
     try {
-      const result = await enableUser(userId);
-      if (result.success) {
-        toast.success('User enabled successfully');
-        onRefresh();
-      } else {
-        toast.error(result.error || 'Failed to enable user');
-      }
+      // TODO: Implement enableUser action
+      toast.info('Enable user functionality not implemented yet');
+      // onRefresh();
     } catch (error) {
       console.log(error)
       toast.error('An error occurred');

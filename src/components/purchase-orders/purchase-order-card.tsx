@@ -32,11 +32,13 @@ interface PurchaseOrderCardProps {
 
 export function PurchaseOrderCard({ order, userRole, onView, onEdit, onSubmit, onApprove, onReceive, onCancel }: PurchaseOrderCardProps) {
   const getStatusColor = (status: PurchaseOrderStatus) => {
-    const colors = {
+    const colors: Record<PurchaseOrderStatus, 'default' | 'primary' | 'success' | 'info' | 'error'> = {
       DRAFT: 'default',
       SUBMITTED: 'primary',
-      APPROVED: 'success',
-      RECEIVED: 'info',
+      CONFIRMED: 'success',
+      EXECUTED_AT_MARKET: 'info',
+      REJECTED_FOR_STOCK: 'error',
+      STOCK_ENTERED: 'success',
       CANCELLED: 'error'
     };
     return colors[status] || 'default';
@@ -59,7 +61,7 @@ export function PurchaseOrderCard({ order, userRole, onView, onEdit, onSubmit, o
           </div>
           <Chip 
             label={order.status.replace('_', ' ')} 
-            color={getStatusColor(order.status) as any}
+            color={getStatusColor(order.status)}
             size="small"
             className="self-start"
           />
@@ -109,7 +111,19 @@ export function PurchaseOrderCard({ order, userRole, onView, onEdit, onSubmit, o
             </Button>
           )}
 
-          {order.status === 'APPROVED' && userRole === 'ADMIN' && (
+          {order.status === 'CONFIRMED' && userRole === 'ADMIN' && (
+            <Button
+              size="small"
+              startIcon={<CheckCircle />}
+              onClick={() => onApprove(order.id)}
+              className="text-xs"
+              color="success"
+            >
+              Execute Order
+            </Button>
+          )}
+
+          {order.status === 'STOCK_ENTERED' && userRole === 'ADMIN' && (
             <Button
               size="small"
               startIcon={<CheckCircle />}
@@ -117,11 +131,11 @@ export function PurchaseOrderCard({ order, userRole, onView, onEdit, onSubmit, o
               className="text-xs"
               color="success"
             >
-              Receive & Add to Stock
+              Complete Order
             </Button>
           )}
 
-          {order.status !== 'RECEIVED' && order.status !== 'CANCELLED' && (
+          {order.status !== 'STOCK_ENTERED' && order.status !== 'CANCELLED' && (
             <Button
               size="small"
               startIcon={<Cancel />}

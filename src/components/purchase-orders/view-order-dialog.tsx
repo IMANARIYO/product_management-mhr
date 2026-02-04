@@ -27,11 +27,13 @@ interface ViewOrderDialogProps {
 
 export function ViewOrderDialog({ open, onClose, order }: ViewOrderDialogProps) {
   const getStatusColor = (status: PurchaseOrderStatus) => {
-    const colors = {
+    const colors: Record<PurchaseOrderStatus, 'default' | 'primary' | 'success' | 'info' | 'error'> = {
       DRAFT: 'default',
       SUBMITTED: 'primary',
-      APPROVED: 'success',
-      RECEIVED: 'info',
+      CONFIRMED: 'success',
+      EXECUTED_AT_MARKET: 'info',
+      REJECTED_FOR_STOCK: 'error',
+      STOCK_ENTERED: 'success',
       CANCELLED: 'error'
     };
     return colors[status] || 'default';
@@ -52,7 +54,7 @@ export function ViewOrderDialog({ open, onClose, order }: ViewOrderDialogProps) 
                 <Typography variant="subtitle2">Status</Typography>
                 <Chip 
                   label={order.status.replace('_', ' ')} 
-                  color={getStatusColor(order.status) as any} 
+                  color={getStatusColor(order.status)} 
                   size="small" 
                 />
               </div>

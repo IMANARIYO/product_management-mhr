@@ -13,6 +13,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:setup": "tsx scripts/setup.ts",
     "db:seed-products": "tsx scripts/seed-products.ts",
+    "db:seed-users": "tsx scripts/seed-users.ts",
     "db:fix": "tsx scripts/fix-database.ts"
   },
   "dependencies": {

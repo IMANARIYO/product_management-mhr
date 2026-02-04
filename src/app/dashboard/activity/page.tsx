@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { redirect } from 'next/navigation';
-import { getCurrentUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
 import { getActivityLogsAction } from '@/app/actions/activity';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Card } from '@/components/ui/card';
@@ -15,10 +14,28 @@ import {
 } from '@/components/ui/select';
 import { Activity } from 'lucide-react';
 
+interface User {
+  id: string;
+  firstName: string;
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  role: 'ADMIN' | 'EMPLOYEE';
+  status: 'ACTIVE' | 'DISABLED';
+}
+
+interface ActivityLog {
+  id: string;
+  action: string;
+  entityType: string;
+  details: string | null;
+  doneAt: string | Date;
+}
+
 export default function ActivityPage() {
-  const [user, setUser] = useState<any>(null);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [dateFilter, setDateFilter] = useState('all');
@@ -26,22 +43,25 @@ export default function ActivityPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const currentUser = await getCurrentUser();
-        // TEMPORARY: Skip auth check
-        // if (!currentUser) {
-        //   redirect('/login');
-        // }
-        setUser(currentUser);
+        const userResult = await getCurrentUserAction();
+        if (userResult.success && userResult.user) {
+          setUser(userResult.user);
+        }
 
         const result = await getActivityLogsAction(page, 20);
         if (result.success) {
-          setLogs(result.logs || []);
+          const mappedLogs = (result.logs || []).map(log => ({
+            id: log.id,
+            action: log.action,
+            entityType: log.entityType,
+            details: log.details,
+            doneAt: log.doneAt
+          }));
+          setLogs(mappedLogs);
           setTotalPages(result.totalPages || 1);
         }
       } catch (error) {
-        console.error('[v0] Error loading activity logs:', error);
-      } finally {
-        setLoading(false);
+        console.error('Error loading activity logs:', error);
       }
     };
 

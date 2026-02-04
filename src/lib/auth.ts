@@ -37,11 +37,17 @@ export async function verifyJWT(token: string): Promise<JWTPayload | null> {
 export async function createSession(
   userId: string,
   phoneNumber: string,
+  fullName: string,
+  firstName: string,
+  email: string,
   role: string
 ): Promise<string> {
   return createJWT({
     userId,
     phoneNumber,
+    fullName,
+    firstName,
+    email,
     role,
     iat: Date.now(),
   });

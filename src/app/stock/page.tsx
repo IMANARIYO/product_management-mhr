@@ -4,7 +4,7 @@ import React from "react"
 
 import { useState, useEffect } from 'react';
 
-import { getCurrentUser } from '@/app/actions/auth';
+import { getCurrentUserAction } from '@/app/actions/profile';
 import { getProducts } from '@/app/actions/products';
 import {
   handleStockAction,
@@ -48,12 +48,10 @@ export default function StockPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const currentUser = await getCurrentUser();
-        // TEMPORARY: Skip auth check
-        // if (!currentUser) {
-        //   redirect('/login');
-        // }
-        setUser(currentUser);
+        const userResult = await getCurrentUserAction();
+        if (userResult.success && userResult.user) {
+          setUser(userResult.user);
+        }
 
         const productsResult = await getProducts(false);
         if (productsResult.success) {

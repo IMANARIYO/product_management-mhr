@@ -6,11 +6,11 @@ import {
   purchaseOrderItems, 
   stocks, 
   stockActions, 
-  dailyStockSnapshots,
   activityLogs 
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-middleware";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 
 export async function getPurchaseOrders(status?: string) {
   try {
@@ -19,7 +19,7 @@ export async function getPurchaseOrders(status?: string) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const whereCondition = status ? eq(purchaseOrders.status, status as 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'RECEIVED' | 'CANCELLED') : undefined;
+    const whereCondition = status ? eq(purchaseOrders.status, status as any) : undefined;
     
     const orders = await db.query.purchaseOrders.findMany({
       where: whereCondition,
@@ -51,27 +51,23 @@ export async function createPurchaseOrder(data: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const orderNumber = `PO-${Date.now()}`;
-    const totalAmount = data.items.reduce((sum, item) => 
-      sum + (item.quantity * parseFloat(item.unitCost)), 0
-    );
+    const orderNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 
     const [order] = await db.insert(purchaseOrders).values({
       orderNumber,
-      totalAmount: totalAmount.toString(),
       status: "DRAFT",
       createdBy: session.userId,
       notes: data.notes
     }).returning();
 
-    // Add items
     for (const item of data.items) {
+      const totalCost = item.quantity * parseFloat(item.unitCost);
       await db.insert(purchaseOrderItems).values({
         purchaseOrderId: order.id,
         productId: item.productId,
-        quantity: item.quantity,
+        desiredQuantity: item.quantity,
         unitCost: item.unitCost,
-        totalCost: (item.quantity * parseFloat(item.unitCost)).toString()
+        totalCost: totalCost.toString()
       });
     }
 
@@ -83,77 +79,11 @@ export async function createPurchaseOrder(data: {
       details: `Created purchase order #${orderNumber}`
     });
 
+    revalidatePath('/dashboard/purchase-orders');
     return { success: true, order };
   } catch (error) {
     console.error("Create purchase order error:", error);
     return { success: false, error: "Failed to create purchase order" };
-  }
-}
-
-export async function updatePurchaseOrder(orderId: string, data: {
-  items: Array<{ productId: string; quantity: number; unitCost: string }>;
-  notes?: string;
-}) {
-  try {
-    const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
-    });
-
-    if (!order) {
-      return { success: false, error: "Purchase order not found" };
-    }
-
-    if (order.status !== "DRAFT") {
-      return { success: false, error: "Can only edit draft orders" };
-    }
-
-    const totalAmount = data.items.reduce((sum, item) => 
-      sum + (item.quantity * parseFloat(item.unitCost)), 0
-    );
-
-    await db.transaction(async (tx) => {
-      // Update order
-      await tx.update(purchaseOrders)
-        .set({
-          totalAmount: totalAmount.toString(),
-          notes: data.notes,
-          updatedAt: new Date()
-        })
-        .where(eq(purchaseOrders.id, orderId));
-
-      // Delete existing items
-      await tx.delete(purchaseOrderItems)
-        .where(eq(purchaseOrderItems.purchaseOrderId, orderId));
-
-      // Add new items
-      for (const item of data.items) {
-        await tx.insert(purchaseOrderItems).values({
-          purchaseOrderId: orderId,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitCost: item.unitCost,
-          totalCost: (item.quantity * parseFloat(item.unitCost)).toString()
-        });
-      }
-
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_UPDATED",
-        entityType: "PURCHASE_ORDER",
-        entityId: orderId,
-        details: `Updated purchase order #${order.orderNumber}`
-      });
-    });
-
-    return { success: true };
-  } catch (error) {
-    console.error("Update purchase order error:", error);
-    return { success: false, error: "Failed to update purchase order" };
   }
 }
 
@@ -165,7 +95,8 @@ export async function submitPurchaseOrder(orderId: string) {
     }
 
     const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
+      where: eq(purchaseOrders.id, orderId),
+      with: { items: true }
     });
 
     if (!order) {
@@ -176,24 +107,27 @@ export async function submitPurchaseOrder(orderId: string) {
       return { success: false, error: "Can only submit draft orders" };
     }
 
-    await db.transaction(async (tx) => {
-      await tx.update(purchaseOrders)
-        .set({
-          status: "SUBMITTED",
-          submittedAt: new Date(),
-          updatedAt: new Date()
-        })
-        .where(eq(purchaseOrders.id, orderId));
+    if (order.items.length === 0) {
+      return { success: false, error: "Cannot submit empty purchase order" };
+    }
 
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_SUBMITTED",
-        entityType: "PURCHASE_ORDER",
-        entityId: orderId,
-        details: `Submitted purchase order #${order.orderNumber} for approval`
-      });
+    await db.update(purchaseOrders)
+      .set({
+        status: "SUBMITTED",
+        submittedAt: new Date(),
+        updatedAt: new Date()
+      })
+      .where(eq(purchaseOrders.id, orderId));
+
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "PURCHASE_ORDER_SUBMITTED",
+      entityType: "PURCHASE_ORDER",
+      entityId: orderId,
+      details: `Submitted purchase order #${order.orderNumber} for approval`
     });
 
+    revalidatePath('/dashboard/purchase-orders');
     return { success: true };
   } catch (error) {
     console.error("Submit purchase order error:", error);
@@ -201,7 +135,58 @@ export async function submitPurchaseOrder(orderId: string) {
   }
 }
 
-export async function cancelPurchaseOrder(orderId: string) {
+export async function confirmPurchaseOrder(orderId: string, confirmedItems: Array<{ itemId: string; confirmedQuantity: number }>) {
+  try {
+    const session = await requireAuth();
+    if (!session || session.role !== "ADMIN") {
+      return { success: false, error: "Only admins can confirm purchase orders" };
+    }
+
+    const order = await db.query.purchaseOrders.findFirst({
+      where: eq(purchaseOrders.id, orderId)
+    });
+
+    if (!order) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (order.status !== "SUBMITTED") {
+      return { success: false, error: "Only submitted orders can be confirmed" };
+    }
+
+    await db.transaction(async (tx) => {
+      for (const item of confirmedItems) {
+        await tx.update(purchaseOrderItems)
+          .set({ confirmedQuantity: item.confirmedQuantity })
+          .where(eq(purchaseOrderItems.id, item.itemId));
+      }
+
+      await tx.update(purchaseOrders)
+        .set({
+          status: "CONFIRMED",
+          confirmedAt: new Date(),
+          updatedAt: new Date()
+        })
+        .where(eq(purchaseOrders.id, orderId));
+
+      await tx.insert(activityLogs).values({
+        userId: session.userId,
+        action: "PURCHASE_ORDER_CONFIRMED",
+        entityType: "PURCHASE_ORDER",
+        entityId: orderId,
+        details: `Confirmed purchase order #${order.orderNumber}`
+      });
+    });
+
+    revalidatePath('/dashboard/purchase-orders');
+    return { success: true };
+  } catch (error) {
+    console.error("Confirm purchase order error:", error);
+    return { success: false, error: "Failed to confirm purchase order" };
+  }
+}
+
+export async function executeAtMarket(orderId: string, actualItems: Array<{ itemId: string; actualFoundQuantity: number; notes?: string }>) {
   try {
     const session = await requireAuth();
     if (!session) {
@@ -216,280 +201,124 @@ export async function cancelPurchaseOrder(orderId: string) {
       return { success: false, error: "Purchase order not found" };
     }
 
-    if (order.status === "RECEIVED") {
-      return { success: false, error: "Cannot cancel received orders" };
+    if (order.status !== "CONFIRMED") {
+      return { success: false, error: "Only confirmed orders can be executed" };
     }
 
     await db.transaction(async (tx) => {
+      for (const item of actualItems) {
+        await tx.update(purchaseOrderItems)
+          .set({ 
+            actualFoundQuantity: item.actualFoundQuantity,
+            notes: item.notes
+          })
+          .where(eq(purchaseOrderItems.id, item.itemId));
+      }
+
       await tx.update(purchaseOrders)
         .set({
-          status: "CANCELLED",
+          status: "EXECUTED_AT_MARKET",
+          executedAt: new Date(),
           updatedAt: new Date()
         })
         .where(eq(purchaseOrders.id, orderId));
 
       await tx.insert(activityLogs).values({
         userId: session.userId,
-        action: "PURCHASE_ORDER_CANCELLED",
+        action: "PURCHASE_ORDER_EXECUTED",
         entityType: "PURCHASE_ORDER",
         entityId: orderId,
-        details: `Cancelled purchase order #${order.orderNumber}`
+        details: `Executed purchase order #${order.orderNumber} at market`
       });
     });
 
+    revalidatePath('/dashboard/purchase-orders');
     return { success: true };
   } catch (error) {
-    console.error("Cancel purchase order error:", error);
-    return { success: false, error: "Failed to cancel purchase order" };
+    console.error("Execute at market error:", error);
+    return { success: false, error: "Failed to execute at market" };
   }
 }
 
-export async function receivePurchaseOrder(purchaseOrderId: string) {
+export async function enterStock(orderId: string) {
   try {
     const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
+    if (!session || session.role !== "ADMIN") {
+      return { success: false, error: "Only admins can enter stock" };
     }
 
-    if (session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can receive purchase orders" };
-    }
-
-    // Get purchase order with items
-    const purchaseOrder = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, purchaseOrderId),
+    const order = await db.query.purchaseOrders.findFirst({
+      where: eq(purchaseOrders.id, orderId),
       with: {
         items: {
-          with: {
-            product: true
-          }
+          with: { product: true }
         }
       }
     });
 
-    if (!purchaseOrder) {
+    if (!order) {
       return { success: false, error: "Purchase order not found" };
     }
 
-    if (purchaseOrder.status !== "APPROVED") {
-      return { success: false, error: "Purchase order must be approved before receiving" };
+    if (order.status !== "EXECUTED_AT_MARKET") {
+      return { success: false, error: "Only executed orders can have stock entered" };
     }
 
-    // Start transaction
+    if (order.stockEnteredAt) {
+      return { success: false, error: "Stock already entered for this order" };
+    }
+
     await db.transaction(async (tx) => {
-      // Update purchase order status
-      await tx
-        .update(purchaseOrders)
-        .set({ 
-          status: "RECEIVED",
-          updatedAt: new Date()
-        })
-        .where(eq(purchaseOrders.id, purchaseOrderId));
+      for (const item of order.items) {
+        if (item.actualFoundQuantity && item.actualFoundQuantity > 0) {
+          await tx.insert(stocks).values({
+            productId: item.productId,
+            quantity: item.actualFoundQuantity,
+            createdBy: session.userId
+          });
 
-      // Add stock for each item
-      for (const item of purchaseOrder.items) {
-        // Add to stocks table
-        await tx.insert(stocks).values({
-          productId: item.productId,
-          quantity: item.quantity,
-          createdBy: session.userId,
-        });
-
-        // Record stock action
-        await tx.insert(stockActions).values({
-          productId: item.productId,
-          actionType: "STOCK_IN",
-          quantity: item.quantity,
-          buyingPrice: item.unitCost,
-          supplier: "Purchase Order",
-          reason: `Purchase Order #${purchaseOrder.orderNumber} received`,
-          doneBy: session.userId,
-        });
+          await tx.insert(stockActions).values({
+            productId: item.productId,
+            actionType: "STOCK_IN",
+            quantity: item.actualFoundQuantity,
+            buyingPrice: item.unitCost,
+            supplier: `Purchase Order #${order.orderNumber}`,
+            reason: `Stock entry from purchase order`,
+            doneBy: session.userId
+          });
+        }
       }
 
-      // Log activity
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_RECEIVED",
-        entityType: "PURCHASE_ORDER",
-        entityId: purchaseOrderId,
-        details: `Received purchase order #${purchaseOrder.orderNumber}`,
-      });
-    });
-
-    return { success: true, message: "Purchase order received and stock added successfully" };
-  } catch (error) {
-    console.error("Receive purchase order error:", error);
-    return { success: false, error: "Failed to receive purchase order" };
-  }
-}
-
-export async function deletePurchaseOrder(purchaseOrderId: string) {
-  try {
-    const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    if (session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can delete purchase orders" };
-    }
-
-    // Get purchase order
-    const purchaseOrder = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, purchaseOrderId)
-    });
-
-    if (!purchaseOrder) {
-      return { success: false, error: "Purchase order not found" };
-    }
-
-    if (purchaseOrder.status === "RECEIVED") {
-      return { success: false, error: "Cannot delete received purchase orders" };
-    }
-
-    // Delete purchase order and items
-    await db.transaction(async (tx) => {
-      // Delete items first
-      await tx
-        .delete(purchaseOrderItems)
-        .where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrderId));
-
-      // Delete purchase order
-      await tx
-        .delete(purchaseOrders)
-        .where(eq(purchaseOrders.id, purchaseOrderId));
-
-      // Log activity
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_DELETED",
-        entityType: "PURCHASE_ORDER",
-        entityId: purchaseOrderId,
-        details: `Deleted purchase order #${purchaseOrder.orderNumber}`,
-      });
-    });
-
-    return { success: true, message: "Purchase order deleted successfully" };
-  } catch (error) {
-    console.error("Delete purchase order error:", error);
-    return { success: false, error: "Failed to delete purchase order" };
-  }
-}
-
-export async function approvePurchaseOrder(purchaseOrderId: string) {
-  try {
-    const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    if (session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can approve purchase orders" };
-    }
-
-    const purchaseOrder = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, purchaseOrderId)
-    });
-
-    if (!purchaseOrder) {
-      return { success: false, error: "Purchase order not found" };
-    }
-
-    if (purchaseOrder.status !== "SUBMITTED") {
-      return { success: false, error: "Only submitted purchase orders can be approved" };
-    }
-
-    await db.transaction(async (tx) => {
-      await tx
-        .update(purchaseOrders)
-        .set({ 
-          status: "APPROVED",
-          approvedAt: new Date(),
+      await tx.update(purchaseOrders)
+        .set({
+          status: "STOCK_ENTERED",
+          stockEnteredAt: new Date(),
           updatedAt: new Date()
         })
-        .where(eq(purchaseOrders.id, purchaseOrderId));
+        .where(eq(purchaseOrders.id, orderId));
 
       await tx.insert(activityLogs).values({
         userId: session.userId,
-        action: "PURCHASE_ORDER_APPROVED",
+        action: "PURCHASE_ORDER_STOCK_ENTERED",
         entityType: "PURCHASE_ORDER",
-        entityId: purchaseOrderId,
-        details: `Approved purchase order #${purchaseOrder.orderNumber}`,
+        entityId: orderId,
+        details: `Entered stock for purchase order #${order.orderNumber}`
       });
     });
 
-    return { success: true, message: "Purchase order approved successfully" };
+    revalidatePath('/dashboard/purchase-orders');
+    return { success: true };
   } catch (error) {
-    console.error("Approve purchase order error:", error);
-    return { success: false, error: "Failed to approve purchase order" };
+    console.error("Enter stock error:", error);
+    return { success: false, error: "Failed to enter stock" };
   }
 }
 
-export async function copyPurchaseOrder(orderId: string) {
+export async function rejectForStock(orderId: string, reason: string) {
   try {
     const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    const originalOrder = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId),
-      with: {
-        items: true
-      }
-    });
-
-    if (!originalOrder) {
-      return { success: false, error: "Purchase order not found" };
-    }
-
-    const orderNumber = `PO-${Date.now()}`;
-    const totalAmount = parseFloat(originalOrder.totalAmount);
-
-    const [newOrder] = await db.insert(purchaseOrders).values({
-      orderNumber,
-      totalAmount: totalAmount.toString(),
-      status: "DRAFT",
-      createdBy: session.userId,
-      notes: `Copy of ${originalOrder.orderNumber}`
-    }).returning();
-
-    // Copy items
-    for (const item of originalOrder.items) {
-      await db.insert(purchaseOrderItems).values({
-        purchaseOrderId: newOrder.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        unitCost: item.unitCost,
-        totalCost: item.totalCost
-      });
-    }
-
-    await db.insert(activityLogs).values({
-      userId: session.userId,
-      action: "PURCHASE_ORDER_COPIED",
-      entityType: "PURCHASE_ORDER",
-      entityId: newOrder.id,
-      details: `Copied purchase order from #${originalOrder.orderNumber} to #${orderNumber}`
-    });
-
-    return { success: true, order: newOrder };
-  } catch (error) {
-    console.error("Copy purchase order error:", error);
-    return { success: false, error: "Failed to copy purchase order" };
-  }
-}
-
-export async function archivePurchaseOrder(orderId: string) {
-  try {
-    const session = await requireAuth();
-    if (!session) {
-      return { success: false, error: "Unauthorized" };
-    }
-
-    if (session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can archive purchase orders" };
+    if (!session || session.role !== "ADMIN") {
+      return { success: false, error: "Only admins can reject stock entry" };
     }
 
     const order = await db.query.purchaseOrders.findFirst({
@@ -500,26 +329,72 @@ export async function archivePurchaseOrder(orderId: string) {
       return { success: false, error: "Purchase order not found" };
     }
 
-    await db.transaction(async (tx) => {
-      await tx.update(purchaseOrders)
-        .set({
-          status: "CANCELLED",
-          updatedAt: new Date()
-        })
-        .where(eq(purchaseOrders.id, orderId));
+    if (order.status !== "EXECUTED_AT_MARKET") {
+      return { success: false, error: "Only executed orders can be rejected for stock" };
+    }
 
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_ARCHIVED",
-        entityType: "PURCHASE_ORDER",
-        entityId: orderId,
-        details: `Archived purchase order #${order.orderNumber}`
-      });
+    await db.update(purchaseOrders)
+      .set({
+        status: "REJECTED_FOR_STOCK",
+        notes: reason,
+        updatedAt: new Date()
+      })
+      .where(eq(purchaseOrders.id, orderId));
+
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "PURCHASE_ORDER_REJECTED_FOR_STOCK",
+      entityType: "PURCHASE_ORDER",
+      entityId: orderId,
+      details: `Rejected stock entry for purchase order #${order.orderNumber}: ${reason}`
     });
 
+    revalidatePath('/dashboard/purchase-orders');
     return { success: true };
   } catch (error) {
-    console.error("Archive purchase order error:", error);
-    return { success: false, error: "Failed to archive purchase order" };
+    console.error("Reject for stock error:", error);
+    return { success: false, error: "Failed to reject for stock" };
+  }
+}
+
+export async function cancelPurchaseOrder(orderId: string) {
+  try {
+    const session = await requireAuth();
+    if (!session || session.role !== "ADMIN") {
+      return { success: false, error: "Only admins can cancel purchase orders" };
+    }
+
+    const order = await db.query.purchaseOrders.findFirst({
+      where: eq(purchaseOrders.id, orderId)
+    });
+
+    if (!order) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (order.status === "STOCK_ENTERED") {
+      return { success: false, error: "Cannot cancel orders with stock already entered" };
+    }
+
+    await db.update(purchaseOrders)
+      .set({
+        status: "CANCELLED",
+        updatedAt: new Date()
+      })
+      .where(eq(purchaseOrders.id, orderId));
+
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "PURCHASE_ORDER_CANCELLED",
+      entityType: "PURCHASE_ORDER",
+      entityId: orderId,
+      details: `Cancelled purchase order #${order.orderNumber}`
+    });
+
+    revalidatePath('/dashboard/purchase-orders');
+    return { success: true };
+  } catch (error) {
+    console.error("Cancel purchase order error:", error);
+    return { success: false, error: "Failed to cancel purchase order" };
   }
 }
