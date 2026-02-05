@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { getCurrentUserAction } from '@/app/actions/profile';
 import { initializeStockDay, verifyProductStock, verifyStockDay as verifyStockDayInit } from '@/app/actions/stock-day-init';
 import { closeCurrentStockDay } from '@/app/actions/stock-day-close';
+import { getStockDayStatus, forceCloseStockDay } from '@/app/actions/stock-day-actions';
 import { handleStockAction } from '@/app/actions/stock';
 import { StockDayStatus } from '@/db/types';
 
@@ -65,6 +66,12 @@ export function StockDayManagement() {
   const [verifiedQuantity, setVerifiedQuantity] = useState(0);
   const [addQuantity, setAddQuantity] = useState(0);
   const [addReason, setAddReason] = useState('');
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionDialogData, setActionDialogData] = useState<{
+    title: string;
+    message: string;
+    actions: Array<{ label: string; action: () => void; color?: 'primary' | 'error' | 'success' }>;
+  } | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -97,6 +104,46 @@ export function StockDayManagement() {
   const handleOpenStockDay = async () => {
     setLoading(true);
     try {
+      const status = await getStockDayStatus();
+      
+      if (status.hasOpen || status.hasVerified) {
+        const stockDay = status.openStockDay || status.verifiedStockDay;
+        const statusText = status.hasOpen ? 'OPEN' : 'VERIFIED';
+        
+        setActionDialogData({
+          title: `Existing Stock Day Found (${statusText})`,
+          message: `There is already a stock day that needs to be closed before opening a new one. What would you like to do?`,
+          actions: [
+            {
+              label: 'Close Existing & Open New',
+              action: async () => {
+                try {
+                  await forceCloseStockDay(stockDay!.id);
+                  toast.success('Previous stock day closed');
+                  const today = new Date();
+                  const result = await initializeStockDay(today);
+                  if (result.stockDay) {
+                    toast.success('New stock day opened successfully');
+                    fetchData();
+                  }
+                } catch (error) {
+                  console.error('Error:', error);
+                  throw error;
+                }
+                setActionDialogOpen(false);
+              },
+              color: 'primary'
+            },
+            {
+              label: 'Cancel',
+              action: () => setActionDialogOpen(false)
+            }
+          ]
+        });
+        setActionDialogOpen(true);
+        return;
+      }
+      
       const today = new Date();
       const result = await initializeStockDay(today);
       if (result.stockDay) {
@@ -105,7 +152,7 @@ export function StockDayManagement() {
       }
     } catch (error) {
       console.error('Error opening stock day:', error);
-      toast.error('Failed to open stock day');
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -197,7 +244,31 @@ export function StockDayManagement() {
       }
     } catch (error) {
       console.error('Error closing stock day:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to close stock day');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to close stock day';
+      
+      if (errorMessage.includes('No open or verified stock day found')) {
+        setActionDialogData({
+          title: 'No Stock Day to Close',
+          message: 'There is no open or verified stock day to close. Would you like to open a new stock day?',
+          actions: [
+            {
+              label: 'Open New Stock Day',
+              action: () => {
+                setActionDialogOpen(false);
+                handleOpenStockDay();
+              },
+              color: 'primary'
+            },
+            {
+              label: 'Cancel',
+              action: () => setActionDialogOpen(false)
+            }
+          ]
+        });
+        setActionDialogOpen(true);
+      } else {
+        throw error;
+      }
     } finally {
       setLoading(false);
     }
@@ -557,6 +628,32 @@ export function StockDayManagement() {
           </CardContent>
         </Card>
       )}
+
+      {/* Action Dialog */}
+      <Dialog open={actionDialogOpen} onClose={() => setActionDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{actionDialogData?.title}</DialogTitle>
+        <DialogContent>
+          <div className="space-y-4 mt-2">
+            <Typography variant="body1">
+              {actionDialogData?.message}
+            </Typography>
+            
+            <div className="flex justify-end gap-2 mt-6">
+              {actionDialogData?.actions.map((action, index) => (
+                <Button 
+                  key={index}
+                  onClick={action.action}
+                  variant={action.color === 'primary' ? 'contained' : 'outlined'}
+                  color={action.color || 'primary'}
+                  disabled={loading}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Close Stock Day Dialog */}
       <Dialog open={closeDialogOpen} onClose={() => setCloseDialogOpen(false)} maxWidth="md" fullWidth>

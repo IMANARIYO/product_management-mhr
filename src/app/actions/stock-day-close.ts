@@ -10,29 +10,50 @@ export async function closeCurrentStockDay() {
   if (!user) throw new Error("Unauthorized");
 
   return await db.transaction(async (tx) => {
-    // 1. Find current verified stock day
-    const verifiedStockDay = await tx.query.stockDays.findFirst({
+    // 1. Find current open or verified stock day
+    const currentStockDay = await tx.query.stockDays.findFirst({
       where: eq(stockDays.status, "VERIFIED"),
+    }) || await tx.query.stockDays.findFirst({
+      where: eq(stockDays.status, "OPEN"),
     });
 
-    if (!verifiedStockDay) {
-      throw new Error("No verified stock day found to close");
+    if (!currentStockDay) {
+      throw new Error("No open or verified stock day found to close");
     }
 
-    // 2. Double-check all products are verified
+    // If stock day is OPEN, verify it first
+    if (currentStockDay.status === "OPEN") {
+      // Check if all products are verified
+      const snapshots = await tx.query.dailyStockSnapshots.findMany({
+        where: eq(dailyStockSnapshots.stockDayId, currentStockDay.id),
+      });
+
+      const unverifiedProducts = snapshots.filter((s) => s.isVerified !== 1);
+      if (unverifiedProducts.length > 0) {
+        throw new Error(
+          `Cannot close day: ${unverifiedProducts.length} products still need verification`
+        );
+      }
+
+      // Verify the stock day first
+      await tx
+        .update(stockDays)
+        .set({
+          status: "VERIFIED",
+          verifiedAt: new Date(),
+          verifiedBy: user.userId,
+          updatedAt: new Date(),
+        })
+        .where(eq(stockDays.id, currentStockDay.id));
+    }
+
+    // 2. Get snapshots with product details
     const snapshots = await tx.query.dailyStockSnapshots.findMany({
-      where: eq(dailyStockSnapshots.stockDayId, verifiedStockDay.id),
+      where: eq(dailyStockSnapshots.stockDayId, currentStockDay.id),
       with: {
         product: true,
       },
     });
-
-    const unverifiedProducts = snapshots.filter((s) => s.isVerified !== 1);
-    if (unverifiedProducts.length > 0) {
-      throw new Error(
-        `Cannot close day: ${unverifiedProducts.length} products still need verification`
-      );
-    }
 
     // 3. Calculate totals from snapshots
     let totalExpectedOpening = 0;
@@ -77,11 +98,11 @@ export async function closeCurrentStockDay() {
         closedBy: user.userId,
         updatedAt: new Date(),
       })
-      .where(eq(stockDays.id, verifiedStockDay.id))
+      .where(eq(stockDays.id, currentStockDay.id))
       .returning();
 
     console.log(
-      `[CLOSE_DAY] Stock day ${verifiedStockDay.id} closed successfully`
+      `[CLOSE_DAY] Stock day ${currentStockDay.id} closed successfully`
     );
 
     return {
