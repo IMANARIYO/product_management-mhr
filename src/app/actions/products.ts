@@ -1,8 +1,14 @@
 "use server";
 
-import { eq, sum, and, or } from "drizzle-orm";
+import { eq, sum, and } from "drizzle-orm";
 import { getSession, requireAuth } from "@/lib/auth-middleware";
-import { activityLogs, products, stocks, stockActions, purchaseOrders, purchaseOrderItems } from "@/db/schema";
+import {
+  activityLogs,
+  products,
+  stocks,
+  stockActions,
+  purchaseOrderItems,
+} from "@/db/schema";
 import { db } from "@/index";
 import {
   NewProduct,
@@ -126,14 +132,14 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
   try {
     const session = await requireAuth();
     if (!session) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: "Unauthorized",
         toast: {
           type: "error" as const,
           title: "Access Denied",
-          message: "You are not authorized to edit products"
-        }
+          message: "You are not authorized to edit products",
+        },
       };
     }
 
@@ -141,19 +147,19 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
     const existingProduct = await db.query.products.findFirst({
       where: eq(products.id, productId),
       with: {
-        stocks: true
-      }
+        stocks: true,
+      },
     });
 
     if (!existingProduct) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: "Product not found",
         toast: {
           type: "error" as const,
           title: "Product Not Found",
-          message: "The product you're trying to edit doesn't exist"
-        }
+          message: "The product you're trying to edit doesn't exist",
+        },
       };
     }
 
@@ -164,15 +170,19 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
     );
 
     // Check if trying to archive product with stock
-    if (data.status === "ARCHIVED" && existingProduct.status === "ACTIVE" && currentStock > 0) {
+    if (
+      data.status === "ARCHIVED" &&
+      existingProduct.status === "ACTIVE" &&
+      currentStock > 0
+    ) {
       return {
         success: false,
         error: `Cannot archive product with existing stock. Current stock: ${currentStock} units`,
         toast: {
           type: "warning" as const,
           title: "Cannot Archive Product",
-          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before archiving.`
-        }
+          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before archiving.`,
+        },
       };
     }
 
@@ -194,14 +204,14 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
 
       const validationErrors = validateProductData(validationData);
       if (validationErrors.length > 0) {
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: validationErrors.join(", "),
           toast: {
             type: "error" as const,
             title: "Validation Error",
-            message: validationErrors.join(", ")
-          }
+            message: validationErrors.join(", "),
+          },
         };
       }
 
@@ -220,8 +230,8 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
             toast: {
               type: "error" as const,
               title: "Duplicate Product",
-              message: `A product with this name, type, and size already exists`
-            }
+              message: `A product with this name, type, and size already exists`,
+            },
           };
         }
       }
@@ -236,67 +246,72 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
     }> = [];
     let hasSignificantPriceChange = false;
     let hasNegativeMargin = false;
-    
+
     if (data.buyingPrice && data.buyingPrice !== existingProduct.buyingPrice) {
       const oldPrice = parseFloat(existingProduct.buyingPrice);
       const newPrice = parseFloat(data.buyingPrice);
       const change = newPrice - oldPrice;
       const percentChange = Math.abs(change / oldPrice) * 100;
-      
+
       priceChanges.push({
         field: "buyingPrice",
         oldValue: existingProduct.buyingPrice,
         newValue: data.buyingPrice,
-        change: change.toFixed(2)
+        change: change.toFixed(2),
       });
-      
+
       if (percentChange > 20) {
         hasSignificantPriceChange = true;
       }
     }
 
-    if (data.sellingPrice && data.sellingPrice !== existingProduct.sellingPrice) {
+    if (
+      data.sellingPrice &&
+      data.sellingPrice !== existingProduct.sellingPrice
+    ) {
       const oldPrice = parseFloat(existingProduct.sellingPrice);
       const newPrice = parseFloat(data.sellingPrice);
       const change = newPrice - oldPrice;
       const percentChange = Math.abs(change / oldPrice) * 100;
-      
+
       priceChanges.push({
         field: "sellingPrice",
         oldValue: existingProduct.sellingPrice,
         newValue: data.sellingPrice,
-        change: change.toFixed(2)
+        change: change.toFixed(2),
       });
-      
+
       if (percentChange > 20) {
         hasSignificantPriceChange = true;
       }
     }
 
-    // Check for negative margin
-    const finalBuyingPrice = parseFloat(data.buyingPrice || existingProduct.buyingPrice);
-    const finalSellingPrice = parseFloat(data.sellingPrice || existingProduct.sellingPrice);
-    
-    if (finalSellingPrice <= finalBuyingPrice) {
+    // Check for negative margin (warning only, not blocking)
+    const finalBuyingPrice = parseFloat(
+      data.buyingPrice || existingProduct.buyingPrice
+    );
+    const finalSellingPrice = parseFloat(
+      data.sellingPrice || existingProduct.sellingPrice
+    );
+
+    if (finalSellingPrice < finalBuyingPrice) {
       hasNegativeMargin = true;
     }
 
-    // Check for active purchase orders
-    const activePurchaseOrders = await db.query.purchaseOrders.findMany({
-      where: and(
-        eq(purchaseOrderItems.productId, productId),
-        or(
-          eq(purchaseOrders.status, "DRAFT"),
-          eq(purchaseOrders.status, "SUBMITTED"),
-          eq(purchaseOrders.status, "CONFIRMED")
-        )
-      ),
+    // Check for active purchase orders containing this product
+    const orderItems = await db.query.purchaseOrderItems.findMany({
+      where: eq(purchaseOrderItems.productId, productId),
       with: {
-        items: {
-          where: eq(purchaseOrderItems.productId, productId)
-        }
-      }
+        order: true,
+      },
     });
+
+    const activePurchaseOrders = orderItems.filter(
+      (item) =>
+        item.order.status === "DRAFT" ||
+        item.order.status === "SUBMITTED" ||
+        item.order.status === "CONFIRMED"
+    );
 
     await db.transaction(async (tx) => {
       // Update with system-controlled timestamp
@@ -305,38 +320,43 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
         updatedAt: new Date(),
       };
 
-      await tx.update(products).set(updateData).where(eq(products.id, productId));
+      await tx
+        .update(products)
+        .set(updateData)
+        .where(eq(products.id, productId));
 
       // Create detailed activity log
       const activityDetails = {
         user: {
           id: session.userId,
           fullName: session.fullName || "Unknown",
-          role: session.role
+          role: session.role,
         },
         product: {
           id: productId,
-          name: existingProduct.name
+          name: existingProduct.name,
         },
         changes: priceChanges,
         warnings: [] as string[],
         stockInfo: {
           currentStock,
-          hasStock: currentStock > 0
+          hasStock: currentStock > 0,
         },
-        activePurchaseOrders: activePurchaseOrders.length
+        activePurchaseOrders: activePurchaseOrders.length,
       };
 
       if (hasSignificantPriceChange) {
         activityDetails.warnings.push("Price change exceeds 20% threshold");
       }
-      
+
       if (hasNegativeMargin) {
         activityDetails.warnings.push("Negative profit margin detected");
       }
-      
+
       if (activePurchaseOrders.length > 0) {
-        activityDetails.warnings.push(`${activePurchaseOrders.length} active purchase orders affected`);
+        activityDetails.warnings.push(
+          `${activePurchaseOrders.length} active purchase orders affected`
+        );
       }
 
       await tx.insert(activityLogs).values({
@@ -351,43 +371,49 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
     // Prepare success message with change summary
     let successMessage = `Product updated successfully`;
     if (priceChanges.length > 0) {
-      const changesSummary = priceChanges.map(change => 
-        `${change.field}: ${change.oldValue} → ${change.newValue} (${parseFloat(change.change) > 0 ? '+' : ''}${change.change})`
-      ).join(', ');
+      const changesSummary = priceChanges
+        .map(
+          (change) =>
+            `${change.field}: ${change.oldValue} → ${change.newValue} (${
+              parseFloat(change.change) > 0 ? "+" : ""
+            }${change.change})`
+        )
+        .join(", ");
       successMessage += `. Changes: ${changesSummary}`;
     }
 
     const warnings: string[] = [];
-    if (hasNegativeMargin) {
-      warnings.push("Warning: Selling price is not higher than buying price");
-    }
     if (activePurchaseOrders.length > 0) {
-      warnings.push(`${activePurchaseOrders.length} active purchase orders will use old prices`);
+      warnings.push(
+        `${activePurchaseOrders.length} active purchase orders will use old prices`
+      );
     }
 
-    revalidatePath('/dashboard/products');
-    
-    return { 
+    revalidatePath("/dashboard/products");
+
+    return {
       success: true,
       priceChanges,
       warnings,
       currentStock,
       toast: {
-        type: hasNegativeMargin ? "warning" as const : "success" as const,
+        type: "success" as const,
         title: "Product Updated",
-        message: successMessage + (warnings.length > 0 ? `. ${warnings.join('. ')}` : '')
-      }
+        message:
+          successMessage +
+          (warnings.length > 0 ? `. ${warnings.join(". ")}` : ""),
+      },
     };
   } catch (error) {
     console.error("Update product error:", error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: "Failed to update product",
       toast: {
         type: "error" as const,
         title: "Update Failed",
-        message: "An error occurred while updating the product"
-      }
+        message: "An error occurred while updating the product",
+      },
     };
   }
 }
@@ -396,14 +422,14 @@ export async function deactivateProduct(productId: string) {
   try {
     const session = await requireAuth();
     if (!session) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: "Unauthorized",
         toast: {
           type: "error" as const,
           title: "Access Denied",
-          message: "You are not authorized to perform this action"
-        }
+          message: "You are not authorized to perform this action",
+        },
       };
     }
 
@@ -413,26 +439,26 @@ export async function deactivateProduct(productId: string) {
     });
 
     if (!product) {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: "Product not found",
         toast: {
           type: "error" as const,
           title: "Product Not Found",
-          message: "The product you're trying to deactivate doesn't exist"
-        }
+          message: "The product you're trying to deactivate doesn't exist",
+        },
       };
     }
 
     if (product.status !== "ACTIVE") {
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: "Product is already inactive",
         toast: {
           type: "warning" as const,
           title: "Already Inactive",
-          message: "This product is already deactivated"
-        }
+          message: "This product is already deactivated",
+        },
       };
     }
 
@@ -443,7 +469,7 @@ export async function deactivateProduct(productId: string) {
       .where(eq(stocks.productId, productId));
 
     const currentStock = Number(stockResult[0]?.total || 0);
-    
+
     if (currentStock > 0) {
       return {
         success: false,
@@ -451,8 +477,8 @@ export async function deactivateProduct(productId: string) {
         toast: {
           type: "error" as const,
           title: "Cannot Deactivate Product",
-          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before deactivating.`
-        }
+          message: `This product has ${currentStock} units in stock. Please sell or remove all stock before deactivating.`,
+        },
       };
     }
 
@@ -473,24 +499,24 @@ export async function deactivateProduct(productId: string) {
       details: `Deactivated product: ${product.name}`,
     });
 
-    return { 
+    return {
       success: true,
       toast: {
         type: "success" as const,
         title: "Product Deactivated",
-        message: `${product.name} has been successfully deactivated`
-      }
+        message: `${product.name} has been successfully deactivated`,
+      },
     };
   } catch (error) {
     console.error("Deactivate product error:", error);
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: "Failed to deactivate product",
       toast: {
         type: "error" as const,
         title: "Deactivation Failed",
-        message: "An error occurred while deactivating the product"
-      }
+        message: "An error occurred while deactivating the product",
+      },
     };
   }
 }

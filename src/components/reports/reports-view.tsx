@@ -74,7 +74,13 @@ export function ReportsView() {
         description: log.details || log.action
       })));
       if (stock.success) setStockReport(stock.report || []);
-      if (sales.success) setSalesReport(sales.report || []);
+      if (sales.success) {
+        setSalesReport(sales.report || [])
+
+        console.log(" the sales ", sales.report)
+
+
+      };
       if (loss.success) setLossReport(loss.report || []);
       if (count.success) setCountReport(count.report || []);
     } finally {

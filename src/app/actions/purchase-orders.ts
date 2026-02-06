@@ -1,16 +1,19 @@
 "use server";
 
 import { db } from "@/index";
-import { 
-  purchaseOrders, 
-  purchaseOrderItems, 
-  stocks, 
-  stockActions, 
-  activityLogs 
+import {
+  purchaseOrders,
+  purchaseOrderItems,
+  activityLogs,
+  stockDays,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-middleware";
 import { eq, desc } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { handleStockAction } from "./stock";
+import { initializeStockDay } from "./stock-day-init";
+
+import { PurchaseOrderStatus } from "@/db/types";
 
 export async function getPurchaseOrders(status?: string) {
   try {
@@ -19,19 +22,21 @@ export async function getPurchaseOrders(status?: string) {
       return { success: false, error: "Unauthorized" };
     }
 
-    const whereCondition = status ? eq(purchaseOrders.status, status as any) : undefined;
-    
+    const whereCondition = status
+      ? eq(purchaseOrders.status, status as PurchaseOrderStatus)
+      : undefined;
+
     const orders = await db.query.purchaseOrders.findMany({
       where: whereCondition,
       with: {
         items: {
           with: {
-            product: true
-          }
+            product: true,
+          },
         },
-        creator: true
+        creator: true,
       },
-      orderBy: [desc(purchaseOrders.createdAt)]
+      orderBy: [desc(purchaseOrders.createdAt)],
     });
 
     return { success: true, orders };
@@ -51,14 +56,19 @@ export async function createPurchaseOrder(data: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const orderNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+    const orderNumber = `PO-${new Date().getFullYear()}-${String(
+      Date.now()
+    ).slice(-6)}`;
 
-    const [order] = await db.insert(purchaseOrders).values({
-      orderNumber,
-      status: "DRAFT",
-      createdBy: session.userId,
-      notes: data.notes
-    }).returning();
+    const [order] = await db
+      .insert(purchaseOrders)
+      .values({
+        orderNumber,
+        status: "DRAFT",
+        createdBy: session.userId,
+        notes: data.notes,
+      })
+      .returning();
 
     for (const item of data.items) {
       const totalCost = item.quantity * parseFloat(item.unitCost);
@@ -67,7 +77,7 @@ export async function createPurchaseOrder(data: {
         productId: item.productId,
         desiredQuantity: item.quantity,
         unitCost: item.unitCost,
-        totalCost: totalCost.toString()
+        totalCost: totalCost.toString(),
       });
     }
 
@@ -76,10 +86,10 @@ export async function createPurchaseOrder(data: {
       action: "PURCHASE_ORDER_CREATED",
       entityType: "PURCHASE_ORDER",
       entityId: order.id,
-      details: `Created purchase order #${orderNumber}`
+      details: `Created purchase order #${orderNumber}`,
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true, order };
   } catch (error) {
     console.error("Create purchase order error:", error);
@@ -87,7 +97,10 @@ export async function createPurchaseOrder(data: {
   }
 }
 
-export async function submitPurchaseOrder(orderId: string) {
+export async function updatePurchaseOrder(orderId: string, data: {
+  items: Array<{ productId: string; quantity: number; unitCost: string }>;
+  notes?: string;
+}) {
   try {
     const session = await requireAuth();
     if (!session) {
@@ -104,6 +117,68 @@ export async function submitPurchaseOrder(orderId: string) {
     }
 
     if (order.status !== "DRAFT") {
+      return { success: false, error: "Can only edit draft orders" };
+    }
+
+    await db.transaction(async (tx) => {
+      // Delete existing items
+      await tx.delete(purchaseOrderItems)
+        .where(eq(purchaseOrderItems.purchaseOrderId, orderId));
+
+      // Insert new items
+      for (const item of data.items) {
+        const totalCost = item.quantity * parseFloat(item.unitCost);
+        await tx.insert(purchaseOrderItems).values({
+          purchaseOrderId: orderId,
+          productId: item.productId,
+          desiredQuantity: item.quantity,
+          unitCost: item.unitCost,
+          totalCost: totalCost.toString(),
+        });
+      }
+
+      // Update order notes
+      await tx.update(purchaseOrders)
+        .set({
+          notes: data.notes,
+          updatedAt: new Date()
+        })
+        .where(eq(purchaseOrders.id, orderId));
+    });
+
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "PURCHASE_ORDER_UPDATED",
+      entityType: "PURCHASE_ORDER",
+      entityId: orderId,
+      details: `Updated purchase order #${order.orderNumber}`
+    });
+
+    revalidatePath("/dashboard/purchase-orders");
+    return { success: true };
+  } catch (error) {
+    console.error("Update purchase order error:", error);
+    return { success: false, error: "Failed to update purchase order" };
+  }
+}
+
+export async function submitPurchaseOrder(orderId: string) {
+  try {
+    const session = await requireAuth();
+    if (!session) {
+      return { success: false, error: "Unauthorized" };
+    }
+
+    const order = await db.query.purchaseOrders.findFirst({
+      where: eq(purchaseOrders.id, orderId),
+      with: { items: true },
+    });
+
+    if (!order) {
+      return { success: false, error: "Purchase order not found" };
+    }
+
+    if (order.status !== "DRAFT") {
       return { success: false, error: "Can only submit draft orders" };
     }
 
@@ -111,11 +186,12 @@ export async function submitPurchaseOrder(orderId: string) {
       return { success: false, error: "Cannot submit empty purchase order" };
     }
 
-    await db.update(purchaseOrders)
+    await db
+      .update(purchaseOrders)
       .set({
         status: "SUBMITTED",
         submittedAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(purchaseOrders.id, orderId));
 
@@ -124,10 +200,10 @@ export async function submitPurchaseOrder(orderId: string) {
       action: "PURCHASE_ORDER_SUBMITTED",
       entityType: "PURCHASE_ORDER",
       entityId: orderId,
-      details: `Submitted purchase order #${order.orderNumber} for approval`
+      details: `Submitted purchase order #${order.orderNumber} for approval`,
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Submit purchase order error:", error);
@@ -135,15 +211,21 @@ export async function submitPurchaseOrder(orderId: string) {
   }
 }
 
-export async function confirmPurchaseOrder(orderId: string, confirmedItems: Array<{ itemId: string; confirmedQuantity: number }>) {
+export async function confirmPurchaseOrder(
+  orderId: string,
+  confirmedItems: Array<{ itemId: string; confirmedQuantity: number }>
+) {
   try {
     const session = await requireAuth();
     if (!session || session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can confirm purchase orders" };
+      return {
+        success: false,
+        error: "Only admins can confirm purchase orders",
+      };
     }
 
     const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
+      where: eq(purchaseOrders.id, orderId),
     });
 
     if (!order) {
@@ -151,21 +233,26 @@ export async function confirmPurchaseOrder(orderId: string, confirmedItems: Arra
     }
 
     if (order.status !== "SUBMITTED") {
-      return { success: false, error: "Only submitted orders can be confirmed" };
+      return {
+        success: false,
+        error: "Only submitted orders can be confirmed",
+      };
     }
 
     await db.transaction(async (tx) => {
       for (const item of confirmedItems) {
-        await tx.update(purchaseOrderItems)
+        await tx
+          .update(purchaseOrderItems)
           .set({ confirmedQuantity: item.confirmedQuantity })
           .where(eq(purchaseOrderItems.id, item.itemId));
       }
 
-      await tx.update(purchaseOrders)
+      await tx
+        .update(purchaseOrders)
         .set({
           status: "CONFIRMED",
           confirmedAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(purchaseOrders.id, orderId));
 
@@ -174,11 +261,11 @@ export async function confirmPurchaseOrder(orderId: string, confirmedItems: Arra
         action: "PURCHASE_ORDER_CONFIRMED",
         entityType: "PURCHASE_ORDER",
         entityId: orderId,
-        details: `Confirmed purchase order #${order.orderNumber}`
+        details: `Confirmed purchase order #${order.orderNumber}`,
       });
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Confirm purchase order error:", error);
@@ -186,7 +273,14 @@ export async function confirmPurchaseOrder(orderId: string, confirmedItems: Arra
   }
 }
 
-export async function executeAtMarket(orderId: string, actualItems: Array<{ itemId: string; actualFoundQuantity: number; notes?: string }>) {
+export async function executeAtMarket(
+  orderId: string,
+  actualItems: Array<{
+    itemId: string;
+    actualFoundQuantity: number;
+    notes?: string;
+  }>
+) {
   try {
     const session = await requireAuth();
     if (!session) {
@@ -194,7 +288,7 @@ export async function executeAtMarket(orderId: string, actualItems: Array<{ item
     }
 
     const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
+      where: eq(purchaseOrders.id, orderId),
     });
 
     if (!order) {
@@ -207,19 +301,21 @@ export async function executeAtMarket(orderId: string, actualItems: Array<{ item
 
     await db.transaction(async (tx) => {
       for (const item of actualItems) {
-        await tx.update(purchaseOrderItems)
-          .set({ 
+        await tx
+          .update(purchaseOrderItems)
+          .set({
             actualFoundQuantity: item.actualFoundQuantity,
-            notes: item.notes
+            notes: item.notes,
           })
           .where(eq(purchaseOrderItems.id, item.itemId));
       }
 
-      await tx.update(purchaseOrders)
+      await tx
+        .update(purchaseOrders)
         .set({
           status: "EXECUTED_AT_MARKET",
           executedAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         })
         .where(eq(purchaseOrders.id, orderId));
 
@@ -228,11 +324,11 @@ export async function executeAtMarket(orderId: string, actualItems: Array<{ item
         action: "PURCHASE_ORDER_EXECUTED",
         entityType: "PURCHASE_ORDER",
         entityId: orderId,
-        details: `Executed purchase order #${order.orderNumber} at market`
+        details: `Executed purchase order #${order.orderNumber} at market`,
       });
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Execute at market error:", error);
@@ -251,9 +347,9 @@ export async function enterStock(orderId: string) {
       where: eq(purchaseOrders.id, orderId),
       with: {
         items: {
-          with: { product: true }
-        }
-      }
+          with: { product: true },
+        },
+      },
     });
 
     if (!order) {
@@ -261,52 +357,60 @@ export async function enterStock(orderId: string) {
     }
 
     if (order.status !== "EXECUTED_AT_MARKET") {
-      return { success: false, error: "Only executed orders can have stock entered" };
+      return {
+        success: false,
+        error: "Only executed orders can have stock entered",
+      };
     }
 
     if (order.stockEnteredAt) {
       return { success: false, error: "Stock already entered for this order" };
     }
 
-    await db.transaction(async (tx) => {
-      for (const item of order.items) {
-        if (item.actualFoundQuantity && item.actualFoundQuantity > 0) {
-          await tx.insert(stocks).values({
-            productId: item.productId,
-            quantity: item.actualFoundQuantity,
-            createdBy: session.userId
-          });
+    // Check for open or verified stock day, create if none exists
+    const openOrVerifiedDay =
+      (await db.query.stockDays.findFirst({
+        where: eq(stockDays.status, "OPEN"),
+      })) ||
+      (await db.query.stockDays.findFirst({
+        where: eq(stockDays.status, "VERIFIED"),
+      }));
 
-          await tx.insert(stockActions).values({
-            productId: item.productId,
-            actionType: "STOCK_IN",
-            quantity: item.actualFoundQuantity,
-            buyingPrice: item.unitCost,
-            supplier: `Purchase Order #${order.orderNumber}`,
-            reason: `Stock entry from purchase order`,
-            doneBy: session.userId
-          });
-        }
+    if (!openOrVerifiedDay) {
+      await initializeStockDay(new Date());
+    }
+
+    // Use handleStockAction for each item
+    for (const item of order.items) {
+      if (item.actualFoundQuantity && item.actualFoundQuantity > 0) {
+        await handleStockAction({
+          productId: item.productId,
+          actionType: "STOCK_IN",
+          quantity: item.actualFoundQuantity,
+          supplier: `Purchase Order #${order.orderNumber}`,
+          reason: `Stock entry from purchase order`,
+        });
       }
+    }
 
-      await tx.update(purchaseOrders)
-        .set({
-          status: "STOCK_ENTERED",
-          stockEnteredAt: new Date(),
-          updatedAt: new Date()
-        })
-        .where(eq(purchaseOrders.id, orderId));
+    await db
+      .update(purchaseOrders)
+      .set({
+        status: "STOCK_ENTERED",
+        stockEnteredAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(purchaseOrders.id, orderId));
 
-      await tx.insert(activityLogs).values({
-        userId: session.userId,
-        action: "PURCHASE_ORDER_STOCK_ENTERED",
-        entityType: "PURCHASE_ORDER",
-        entityId: orderId,
-        details: `Entered stock for purchase order #${order.orderNumber}`
-      });
+    await db.insert(activityLogs).values({
+      userId: session.userId,
+      action: "PURCHASE_ORDER_STOCK_ENTERED",
+      entityType: "PURCHASE_ORDER",
+      entityId: orderId,
+      details: `Entered stock for purchase order #${order.orderNumber}`,
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Enter stock error:", error);
@@ -322,7 +426,7 @@ export async function rejectForStock(orderId: string, reason: string) {
     }
 
     const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
+      where: eq(purchaseOrders.id, orderId),
     });
 
     if (!order) {
@@ -330,14 +434,18 @@ export async function rejectForStock(orderId: string, reason: string) {
     }
 
     if (order.status !== "EXECUTED_AT_MARKET") {
-      return { success: false, error: "Only executed orders can be rejected for stock" };
+      return {
+        success: false,
+        error: "Only executed orders can be rejected for stock",
+      };
     }
 
-    await db.update(purchaseOrders)
+    await db
+      .update(purchaseOrders)
       .set({
         status: "REJECTED_FOR_STOCK",
         notes: reason,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(purchaseOrders.id, orderId));
 
@@ -346,10 +454,10 @@ export async function rejectForStock(orderId: string, reason: string) {
       action: "PURCHASE_ORDER_REJECTED_FOR_STOCK",
       entityType: "PURCHASE_ORDER",
       entityId: orderId,
-      details: `Rejected stock entry for purchase order #${order.orderNumber}: ${reason}`
+      details: `Rejected stock entry for purchase order #${order.orderNumber}: ${reason}`,
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Reject for stock error:", error);
@@ -361,11 +469,14 @@ export async function cancelPurchaseOrder(orderId: string) {
   try {
     const session = await requireAuth();
     if (!session || session.role !== "ADMIN") {
-      return { success: false, error: "Only admins can cancel purchase orders" };
+      return {
+        success: false,
+        error: "Only admins can cancel purchase orders",
+      };
     }
 
     const order = await db.query.purchaseOrders.findFirst({
-      where: eq(purchaseOrders.id, orderId)
+      where: eq(purchaseOrders.id, orderId),
     });
 
     if (!order) {
@@ -373,13 +484,17 @@ export async function cancelPurchaseOrder(orderId: string) {
     }
 
     if (order.status === "STOCK_ENTERED") {
-      return { success: false, error: "Cannot cancel orders with stock already entered" };
+      return {
+        success: false,
+        error: "Cannot cancel orders with stock already entered",
+      };
     }
 
-    await db.update(purchaseOrders)
+    await db
+      .update(purchaseOrders)
       .set({
         status: "CANCELLED",
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(purchaseOrders.id, orderId));
 
@@ -388,10 +503,10 @@ export async function cancelPurchaseOrder(orderId: string) {
       action: "PURCHASE_ORDER_CANCELLED",
       entityType: "PURCHASE_ORDER",
       entityId: orderId,
-      details: `Cancelled purchase order #${order.orderNumber}`
+      details: `Cancelled purchase order #${order.orderNumber}`,
     });
 
-    revalidatePath('/dashboard/purchase-orders');
+    revalidatePath("/dashboard/purchase-orders");
     return { success: true };
   } catch (error) {
     console.error("Cancel purchase order error:", error);

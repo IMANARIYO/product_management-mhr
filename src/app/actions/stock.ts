@@ -214,6 +214,12 @@ export async function handleStockAction({
 
       // 7. Create stock action record
       console.log(`[STOCK_ACTION_RECORD] Creating action record`);
+      
+      // For SOLD actions, use product's selling price if not provided
+      const finalSellingPrice = actionType === "SOLD" && !sellingPrice 
+        ? product.sellingPrice 
+        : sellingPrice;
+      
       const [newAction] = await tx
         .insert(stockActions)
         .values({
@@ -221,7 +227,7 @@ export async function handleStockAction({
           actionType,
           quantity,
           supplier,
-          sellingPrice,
+          sellingPrice: finalSellingPrice,
           reason,
           doneBy: session.userId,
         })

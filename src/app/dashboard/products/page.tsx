@@ -35,14 +35,8 @@ export default function DashboardProductsPage() {
       console.log('Products result:', result);
 
       if (result.success && result.products) {
-        // Add mock stock data for now
-        const productsWithStock = result.products.map(product => ({
-          ...product,
-          currentStock: 0 // Default to 0 stock
-        }));
-
-        setProducts(productsWithStock);
-        toast.success(`Loaded ${productsWithStock.length} products`);
+        setProducts(result.products as ProductWithStock[]);
+        toast.success(`Loaded ${result.products.length} products`);
       } else {
         toast.error(result.error || 'Failed to load products');
       }

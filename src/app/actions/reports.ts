@@ -149,7 +149,9 @@ export async function getSalesReport(filters?: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const conditions: Parameters<typeof and>[0][] = [eq(stockActions.actionType, "SOLD")];
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(stockActions.actionType, "SOLD"),
+    ];
 
     if (filters?.startDate) {
       conditions.push(gte(stockActions.doneAt, filters.startDate));
@@ -183,6 +185,7 @@ export async function getSalesReport(filters?: {
         totalRevenue += parseFloat(sale.sellingPrice) * sale.quantity;
       }
     });
+    console.log("the sales report", sales);
 
     return { success: true, report: sales, totalRevenue };
   } catch (error) {
@@ -202,7 +205,9 @@ export async function getLossReport(filters?: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const conditions: Parameters<typeof and>[0][] = [eq(stockActions.actionType, "BROKEN")];
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(stockActions.actionType, "BROKEN"),
+    ];
 
     if (filters?.startDate) {
       conditions.push(gte(stockActions.doneAt, filters.startDate));
@@ -249,7 +254,9 @@ export async function getStockCountReport(filters?: {
       return { success: false, error: "Unauthorized" };
     }
 
-    const conditions: Parameters<typeof and>[0][] = [eq(stockActions.actionType, "COUNTED")];
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(stockActions.actionType, "COUNTED"),
+    ];
 
     if (filters?.startDate) {
       conditions.push(gte(stockActions.doneAt, filters.startDate));

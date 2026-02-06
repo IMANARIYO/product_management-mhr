@@ -196,7 +196,7 @@ export function ProductsList({ products, userRole, onProductsChange }: ProductsL
                 },
               },
             }}
-            pageSizeOptions={[5, 10, 25]}
+            pageSizeOptions={[5, 10, 20, 30, 40, 50, 100]}
             checkboxSelection
             disableRowSelectionOnClick
             sx={{
