@@ -40,8 +40,8 @@ function validateProductData(data: {
   if (isNaN(buyingPrice) || buyingPrice <= 0) {
     errors.push("Buying price must be greater than 0");
   }
-  if (isNaN(sellingPrice) || sellingPrice <= buyingPrice) {
-    errors.push("Selling price must be greater than buying price");
+  if (isNaN(sellingPrice) || sellingPrice <= 0) {
+    errors.push("Selling price must be greater than 0");
   }
 
   return errors;
@@ -53,21 +53,17 @@ async function checkDuplicateProduct(
   size: string,
   excludeId?: string
 ) {
-  const whereClause = excludeId
-    ? and(
-        eq(products.name, name),
-        eq(products.type, type as ProductType),
-        eq(products.size, size),
-        eq(products.status, "ACTIVE")
-      )
-    : and(
-        eq(products.name, name),
-        eq(products.type, type as ProductType),
-        eq(products.size, size),
-        eq(products.status, "ACTIVE")
-      );
+  const allProducts = await db.query.products.findMany({
+    where: and(
+      eq(products.name, name),
+      eq(products.type, type as ProductType),
+      eq(products.size, size),
+      eq(products.status, "ACTIVE")
+    )
+  });
 
-  const existing = await db.query.products.findFirst({ where: whereClause });
+  // Filter out the product being edited
+  const existing = allProducts.find(p => p.id !== excludeId);
   return existing;
 }
 
@@ -325,38 +321,37 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
         .set(updateData)
         .where(eq(products.id, productId));
 
-      // Create detailed activity log
-      const activityDetails = {
-        user: {
-          id: session.userId,
-          fullName: session.fullName || "Unknown",
-          role: session.role,
-        },
-        product: {
-          id: productId,
-          name: existingProduct.name,
-        },
-        changes: priceChanges,
-        warnings: [] as string[],
-        stockInfo: {
-          currentStock,
-          hasStock: currentStock > 0,
-        },
-        activePurchaseOrders: activePurchaseOrders.length,
-      };
+      // Track all changes
+      const allChanges: Record<string, { old: any; new: any }> = {};
+      
+      if (data.name && data.name !== existingProduct.name) {
+        allChanges.name = { old: existingProduct.name, new: data.name };
+      }
+      if (data.type && data.type !== existingProduct.type) {
+        allChanges.type = { old: existingProduct.type, new: data.type };
+      }
+      if (data.size && data.size !== existingProduct.size) {
+        allChanges.size = { old: existingProduct.size, new: data.size };
+      }
+      if (data.buyingPrice && data.buyingPrice !== existingProduct.buyingPrice) {
+        allChanges.buyingPrice = { old: existingProduct.buyingPrice, new: data.buyingPrice };
+      }
+      if (data.sellingPrice && data.sellingPrice !== existingProduct.sellingPrice) {
+        allChanges.sellingPrice = { old: existingProduct.sellingPrice, new: data.sellingPrice };
+      }
+      if (data.status && data.status !== existingProduct.status) {
+        allChanges.status = { old: existingProduct.status, new: data.status };
+      }
 
+      const warnings: string[] = [];
       if (hasSignificantPriceChange) {
-        activityDetails.warnings.push("Price change exceeds 20% threshold");
+        warnings.push("Price change exceeds 20% threshold");
       }
-
       if (hasNegativeMargin) {
-        activityDetails.warnings.push("Negative profit margin detected");
+        warnings.push("Negative profit margin detected");
       }
-
       if (activePurchaseOrders.length > 0) {
-        activityDetails.warnings.push(
-          `${activePurchaseOrders.length} active purchase orders affected`
-        );
+        warnings.push(`${activePurchaseOrders.length} active purchase orders affected`);
       }
 
       await tx.insert(activityLogs).values({
@@ -364,7 +359,12 @@ export async function updateProduct(productId: string, data: UpdateProduct) {
         action: "UPDATE_PRODUCT",
         entityType: "PRODUCT",
         entityId: productId,
-        details: JSON.stringify(activityDetails),
+        details: JSON.stringify({
+          productName: existingProduct.name,
+          changes: allChanges,
+          warnings,
+          currentStock,
+        }),
       });
     });
 

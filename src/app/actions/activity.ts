@@ -121,7 +121,7 @@ export async function getAdminActivityLogsAction(
       totalPages: Math.ceil(allLogs.length / limit),
     };
   } catch (error) {
-    console.error("[v0] Get admin activity logs error:", error);
+    console.error(" Get admin activity logs error:", error);
     return { error: "Failed to fetch activity logs" };
   }
 }

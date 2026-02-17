@@ -104,6 +104,53 @@ export default function ActivityPage() {
     }
   };
 
+  const formatDetails = (action: string, details: string | null) => {
+    if (!details) return null;
+
+    // For UPDATE_PRODUCT, parse and format the JSON
+    if (action === 'UPDATE_PRODUCT') {
+      try {
+        const data = JSON.parse(details);
+        const { productName, changes, warnings, currentStock } = data;
+
+        return (
+          <div className="mt-2 space-y-2">
+            <p className="text-sm font-medium">Updated product: {productName}</p>
+            
+            {Object.keys(changes).length > 0 && (
+              <div className="text-sm space-y-1">
+                {Object.entries(changes).map(([field, change]: [string, any]) => (
+                  <div key={field} className="flex items-center gap-2">
+                    <span className="font-medium capitalize">{field}:</span>
+                    <span className="text-red-600">{change.old}</span>
+                    <span>→</span>
+                    <span className="text-green-600">{change.new}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {warnings && warnings.length > 0 && (
+              <div className="text-xs text-orange-600 mt-2">
+                ⚠️ {warnings.join(', ')}
+              </div>
+            )}
+
+            <div className="text-xs text-muted-foreground">
+              Current stock: {currentStock} units
+            </div>
+          </div>
+        );
+      } catch (e) {
+        // If parsing fails, show raw details
+        return <p className="text-sm text-muted-foreground mt-1">{details}</p>;
+      }
+    }
+
+    // For other actions, show details as-is
+    return <p className="text-sm text-muted-foreground mt-1">{details}</p>;
+  };
+
   if (!user) return null;
 
   return (
@@ -160,9 +207,7 @@ export default function ActivityPage() {
                         </span>
                       </div>
 
-                      {log.details && (
-                        <p className="text-sm text-muted-foreground mt-1">{log.details}</p>
-                      )}
+                      {formatDetails(log.action, log.details)}
 
                       <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                         <span>{new Date(log.doneAt).toLocaleDateString()}</span>
