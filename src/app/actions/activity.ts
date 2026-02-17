@@ -12,6 +12,7 @@ export async function getActivityLogsAction(
   startDate?: Date,
   endDate?: Date
 ) {
+  console.log("*******************  fetching the ctaiti  logs");
   try {
     const session = await getSession();
     if (!session) {
@@ -47,7 +48,7 @@ export async function getActivityLogsAction(
         user: true,
       },
     });
-
+    console.log(" the logs am getting  ", paginatedLogs);
     return {
       success: true,
       logs: paginatedLogs,

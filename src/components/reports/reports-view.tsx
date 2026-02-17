@@ -98,8 +98,47 @@ export function ReportsView() {
       ARCHIVE_PRODUCT: 'bg-gray-100 text-gray-800',
       CREDIT_SALE: 'bg-orange-100 text-orange-800',
       CREDIT_PAID: 'bg-green-100 text-green-800',
+      UPDATE_PRODUCT: 'bg-blue-100 text-blue-800',
     };
     return colors[actionType] || 'bg-gray-100 text-gray-800';
+  };
+
+  const formatActivityDetails = (action: string, details: string | null) => {
+    if (!details) return action;
+
+    // Decode HTML entities
+    const decodeHtmlEntities = (text: string) => {
+      return text
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&#39;/g, "'");
+    };
+
+    // For UPDATE_PRODUCT, parse and format the JSON
+    if (action === 'UPDATE_PRODUCT') {
+      try {
+        const decodedDetails = decodeHtmlEntities(details);
+        const data = JSON.parse(decodedDetails);
+        const { productName, changes, warnings } = data;
+
+        const changesList = Object.entries(changes || {}).map(([field, change]) => {
+          const changeData = change as { old: string; new: string };
+          return `${field}: ${changeData.old} → ${changeData.new}`;
+        }).join(', ');
+
+        let result = `Updated product: ${productName}`;
+        if (changesList) result += ` (${changesList})`;
+        if (warnings && warnings.length > 0) result += ` ⚠️ ${warnings.join(', ')}`;
+        
+        return result;
+      } catch (e) {
+        return details;
+      }
+    }
+
+    return details;
   };
 
   return (
@@ -127,9 +166,8 @@ export function ReportsView() {
                       className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted transition"
                     >
                       <div className="flex-1">
-                        <p className="font-medium">{log.details || log.action}</p>
+                        <p className="font-medium">{formatActivityDetails(log.action, log.details)}</p>
                         <p className="text-sm text-muted-foreground">
-                          {/* {log.user.fullName} •{' '} */}
                           {formatDistanceToNow(new Date(log.doneAt), { addSuffix: true })}
                         </p>
                       </div>

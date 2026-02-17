@@ -116,17 +116,20 @@ export default function ActivityPage() {
         return (
           <div className="mt-2 space-y-2">
             <p className="text-sm font-medium">Updated product: {productName}</p>
-            
+
             {Object.keys(changes).length > 0 && (
               <div className="text-sm space-y-1">
-                {Object.entries(changes).map(([field, change]: [string, any]) => (
-                  <div key={field} className="flex items-center gap-2">
-                    <span className="font-medium capitalize">{field}:</span>
-                    <span className="text-red-600">{change.old}</span>
-                    <span>→</span>
-                    <span className="text-green-600">{change.new}</span>
-                  </div>
-                ))}
+                {Object.entries(changes).map(([field, change]) => {
+                  const changeData = change as { old: string; new: string };
+                  return (
+                    <div key={field} className="flex items-center gap-2">
+                      <span className="font-medium capitalize">{field}:</span>
+                      <span className="text-red-600">{changeData.old}</span>
+                      <span>→</span>
+                      <span className="text-green-600">{changeData.new}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -142,6 +145,7 @@ export default function ActivityPage() {
           </div>
         );
       } catch (e) {
+        console.log("error", e)
         // If parsing fails, show raw details
         return <p className="text-sm text-muted-foreground mt-1">{details}</p>;
       }
