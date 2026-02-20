@@ -35,12 +35,14 @@ export default function StockDayInitializer() {
       const today = new Date();
       const result = await initializeStockDay(today);
       
-      if (!result.success) {
+      if ('error' in result && !result.success) {
         setError(result.error || "Failed to initialize stock day");
         return;
       }
       
-      setResult(result);
+      if ('stockDay' in result && result.success) {
+        setResult(result);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize stock day");
     } finally {
@@ -57,7 +59,7 @@ export default function StockDayInitializer() {
       const today = new Date();
       const refreshed = await initializeStockDay(today);
       
-      if (refreshed.success) {
+      if ('stockDay' in refreshed && refreshed.success) {
         setResult(refreshed);
       }
     } catch (err) {
@@ -78,7 +80,7 @@ export default function StockDayInitializer() {
       const today = new Date();
       const refreshed = await initializeStockDay(today);
       
-      if (refreshed.success) {
+      if ('stockDay' in refreshed && refreshed.success) {
         setResult(refreshed);
       }
     } catch (err) {
@@ -99,7 +101,7 @@ export default function StockDayInitializer() {
       const today = new Date();
       const refreshed = await initializeStockDay(today);
       
-      if (refreshed.success) {
+      if ('stockDay' in refreshed && refreshed.success) {
         setResult(refreshed);
       }
     } catch (err) {

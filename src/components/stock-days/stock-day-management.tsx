@@ -87,7 +87,7 @@ export function StockDayManagement() {
 
       const today = new Date();
       const result = await initializeStockDay(today);
-      if (result.stockDay && result.snapshots) {
+      if ('stockDay' in result && result.stockDay && result.snapshots) {
         setStockDay({
           ...result.stockDay,
           snapshots: result.snapshots
@@ -122,7 +122,7 @@ export function StockDayManagement() {
                   toast.success('Previous stock day closed');
                   const today = new Date();
                   const result = await initializeStockDay(today);
-                  if (result.stockDay) {
+                  if ('stockDay' in result && result.stockDay) {
                     toast.success('New stock day opened successfully');
                     fetchData();
                   }
@@ -146,7 +146,7 @@ export function StockDayManagement() {
       
       const today = new Date();
       const result = await initializeStockDay(today);
-      if (result.stockDay) {
+      if ('stockDay' in result && result.stockDay) {
         toast.success('Stock day opened successfully');
         fetchData();
       }
