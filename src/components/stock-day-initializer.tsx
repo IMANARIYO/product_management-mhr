@@ -34,6 +34,12 @@ export default function StockDayInitializer() {
     try {
       const today = new Date();
       const result = await initializeStockDay(today);
+      
+      if (!result.success) {
+        setError(result.error || "Failed to initialize stock day");
+        return;
+      }
+      
       setResult(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to initialize stock day");
@@ -50,7 +56,10 @@ export default function StockDayInitializer() {
       // Refresh the data
       const today = new Date();
       const refreshed = await initializeStockDay(today);
-      setResult(refreshed);
+      
+      if (refreshed.success) {
+        setResult(refreshed);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to verify product");
     } finally {
@@ -68,7 +77,10 @@ export default function StockDayInitializer() {
       // Refresh the data
       const today = new Date();
       const refreshed = await initializeStockDay(today);
-      setResult(refreshed);
+      
+      if (refreshed.success) {
+        setResult(refreshed);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to verify stock day");
     } finally {
@@ -86,7 +98,10 @@ export default function StockDayInitializer() {
       // Refresh the data
       const today = new Date();
       const refreshed = await initializeStockDay(today);
-      setResult(refreshed);
+      
+      if (refreshed.success) {
+        setResult(refreshed);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to close stock day");
     } finally {

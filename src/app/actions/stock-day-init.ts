@@ -29,7 +29,7 @@ export async function getStockDay(businessDate: Date) {
       },
     });
 
-    return { stockDay: existingStockDay, snapshots: snapshotsWithProducts };
+    return { success: true, stockDay: existingStockDay, snapshots: snapshotsWithProducts };
   }
 
   return null;
@@ -57,7 +57,15 @@ export async function initializeStockDay(businessDate: Date) {
   });
 
   if (openStockDay) {
-    throw new Error("Cannot open new stock day. Close existing open stock day first.");
+    return {
+      success: false,
+      error: "Cannot open new stock day. Close existing open stock day first.",
+      openStockDay: {
+        id: openStockDay.id,
+        businessDate: openStockDay.businessDate,
+        status: openStockDay.status
+      }
+    };
   }
 
   // 3. Get all active products
@@ -122,7 +130,7 @@ export async function initializeStockDay(businessDate: Date) {
     },
   });
 
-  return { stockDay, snapshots: snapshotsWithProducts };
+  return { success: true, stockDay, snapshots: snapshotsWithProducts };
 }
 
 export async function verifyProductStock(
