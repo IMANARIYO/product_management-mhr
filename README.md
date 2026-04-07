@@ -133,6 +133,16 @@ Admins can view the full activity log. Employees see only their own activity.
 
 ---
 
+## Test Credentials
+
+| Role | Phone | Password |
+|------|-------|----------|
+| Admin | +250788123456 | admin123 |
+| Employee | +250788123457 | john123 |
+| Employee | +250788123458 | jane123 |
+
+---
+
 ## Getting Started
 
 ```bash
