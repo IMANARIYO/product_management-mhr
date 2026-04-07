@@ -1,5 +1,5 @@
 import { db } from '../src/index';
-import { users, products, stockActions, creditSales, activityLogs } from '../src/db/schema';
+import { users } from '../src/db/schema';
 import { sql } from 'drizzle-orm';
 
 async function fixDatabase() {
